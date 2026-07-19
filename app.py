@@ -1,0 +1,203 @@
+import os
+import uuid
+import json
+from pathlib import Path
+from flask import Flask, render_template, request, redirect, url_for, abort
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = Path('uploads')
+app.config['BOOKS_FOLDER'] = Path('books')
+app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
+
+ALLOWED_EXTENSIONS = {'.epub', '.pdf'}
+
+for folder in (app.config['UPLOAD_FOLDER'], app.config['BOOKS_FOLDER']):
+    folder.mkdir(exist_ok=True)
+
+
+def parse_epub(filepath: Path) -> dict:
+    import ebooklib
+    from ebooklib import epub
+    from bs4 import BeautifulSoup
+
+    book = epub.read_epub(str(filepath))
+
+    meta_title = book.get_metadata('DC', 'title')
+    title = meta_title[0][0] if meta_title else filepath.stem
+
+    meta_author = book.get_metadata('DC', 'creator')
+    author = meta_author[0][0] if meta_author else ''
+
+    KEEP_TAGS = {
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'em', 'strong', 'i', 'b', 'blockquote',
+        'ul', 'ol', 'li', 'br', 'hr', 'span',
+        'figure', 'figcaption',
+    }
+
+    spine_ids = [item[0] for item in book.spine]
+    ordered_items = []
+    for sid in spine_ids:
+        item = book.get_item_with_id(sid)
+        if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
+            ordered_items.append(item)
+
+    if not ordered_items:
+        ordered_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+
+    sections = []
+    for item in ordered_items:
+        try:
+            raw = item.get_content().decode('utf-8', errors='replace')
+        except Exception:
+            continue
+
+        soup = BeautifulSoup(raw, 'lxml')
+
+        for tag in soup(['script', 'style', 'meta', 'link', 'head']):
+            tag.decompose()
+
+        body = soup.find('body') or soup
+
+        # Strip disallowed tags but keep their text content
+        for tag in body.find_all(True):
+            if tag.name not in KEEP_TAGS:
+                tag.unwrap()
+
+        # Remove all attributes for security
+        for tag in body.find_all(True):
+            tag.attrs = {}
+
+        html = str(body)
+        text = body.get_text(strip=True)
+
+        if len(text) > 80:
+            sections.append({'html': html})
+
+    return {'title': title, 'author': author, 'sections': sections, 'format': 'epub'}
+
+
+def parse_pdf(filepath: Path) -> dict:
+    import fitz
+
+    doc = fitz.open(str(filepath))
+    title = doc.metadata.get('title', '').strip() or filepath.stem
+    author = doc.metadata.get('author', '').strip()
+
+    sections = []
+
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        try:
+            data = page.get_text("dict")
+        except Exception:
+            continue
+
+        html_parts = []
+        for block in data.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+
+            lines = block.get("lines", [])
+            if not lines:
+                continue
+
+            all_spans = [s for line in lines for s in line.get("spans", [])]
+            if not all_spans:
+                continue
+
+            avg_size = sum(s.get("size", 12) for s in all_spans) / len(all_spans)
+            is_bold = any("Bold" in s.get("font", "") for s in all_spans)
+
+            line_texts = []
+            for line in lines:
+                lt = " ".join(s.get("text", "") for s in line.get("spans", [])).strip()
+                if lt:
+                    line_texts.append(lt)
+
+            text = " ".join(line_texts).strip()
+            if not text:
+                continue
+
+            if avg_size >= 15 or (is_bold and len(text) < 120):
+                tag = "h2" if avg_size >= 18 else "h3"
+                html_parts.append(f"<{tag}>{text}</{tag}>")
+            else:
+                html_parts.append(f"<p>{text}</p>")
+
+        if html_parts:
+            sections.append({'html': "\n".join(html_parts)})
+
+    doc.close()
+    return {'title': title, 'author': author, 'sections': sections, 'format': 'pdf'}
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'file' not in request.files:
+        return redirect(url_for('index'))
+
+    file = request.files['file']
+    if not file or not file.filename:
+        return redirect(url_for('index'))
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return render_template('index.html', error="Formato inválido. Envie um arquivo .epub ou .pdf.")
+
+    book_id = str(uuid.uuid4())
+    tmp_path = app.config['UPLOAD_FOLDER'] / f'{book_id}{ext}'
+
+    try:
+        file.save(tmp_path)
+
+        if ext == '.epub':
+            book_data = parse_epub(tmp_path)
+        else:
+            book_data = parse_pdf(tmp_path)
+
+        if not book_data['sections']:
+            return render_template('index.html', error="Não foi possível extrair conteúdo do arquivo.")
+
+        book_data['id'] = book_id
+        book_data['original_filename'] = file.filename
+
+        book_path = app.config['BOOKS_FOLDER'] / f'{book_id}.json'
+        with open(book_path, 'w', encoding='utf-8') as f:
+            json.dump(book_data, f, ensure_ascii=False)
+
+    except Exception as e:
+        return render_template('index.html', error=f"Erro ao processar arquivo: {e}")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+    return redirect(url_for('reader', book_id=book_id))
+
+
+@app.route('/reader/<book_id>')
+def reader(book_id):
+    try:
+        uuid.UUID(book_id)
+    except ValueError:
+        abort(404)
+
+    book_path = app.config['BOOKS_FOLDER'] / f'{book_id}.json'
+    if not book_path.exists():
+        abort(404)
+
+    with open(book_path, 'r', encoding='utf-8') as f:
+        book = json.load(f)
+
+    return render_template('reader.html', book=book)
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

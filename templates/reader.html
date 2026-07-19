@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>{{ book.title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Paleta científica: fundo creme quente, texto marrom-escuro, Lora serif */
+    :root {
+      --bg:           #F7F2E8;
+      --bg2:          #EDE7D9;
+      --bg3:          #E2D9C9;
+      --text:         #2B1D10;
+      --text-h:       #1A0F06;
+      --muted:        #7A6858;
+      --border:       #D4C9B8;
+      --accent:       #9B6A2F;
+      --accent2:      #C8956C;
+      --chapter-bg:   #2B1D10;
+      --chapter-text: #F7F2E8;
+      --tb-bg:        rgba(247,242,232,0.94);
+      --fs: 19px;
+    }
+    .dark {
+      --bg:           #1C1814;
+      --bg2:          #252118;
+      --bg3:          #2E2820;
+      --text:         #E8DCC8;
+      --text-h:       #F2EAD6;
+      --muted:        #9A8C7A;
+      --border:       #3A342C;
+      --accent:       #C8956C;
+      --accent2:      #E0AA80;
+      --chapter-bg:   #0E0C0A;
+      --chapter-text: #E8DCC8;
+      --tb-bg:        rgba(28,24,20,0.94);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%; height: 100dvh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Lora', Georgia, serif;
+      font-size: var(--fs);
+      transition: background .3s, color .3s;
+    }
+
+    /* ── Toolbar ─────────────────────────────────────── */
+    .toolbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 200;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px 0 6px;
+      background: var(--tb-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      transition: opacity .35s, transform .35s, background .3s;
+    }
+    .toolbar.hidden { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+
+    .btn-icon {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+      font-size: .8rem; font-weight: 600;
+      padding: 6px 8px; border-radius: 8px;
+      transition: background .15s, color .15s;
+      flex-shrink: 0;
+    }
+    .btn-icon:hover { background: var(--bg3); color: var(--text); }
+    .btn-back { font-size: 1.15rem; }
+
+    .toolbar-center {
+      flex: 1; min-width: 0;
+      display: flex; flex-direction: column;
+    }
+    .tb-book {
+      font-family: 'Inter', sans-serif;
+      font-size: .68rem; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: .08em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tb-chapter {
+      font-family: 'Lora', serif;
+      font-size: .85rem; font-weight: 600;
+      color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .toolbar-right { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .tb-counter {
+      font-family: 'Inter', sans-serif;
+      font-size: .72rem; font-weight: 600; color: var(--muted);
+      white-space: nowrap; padding: 0 4px;
+    }
+    #btn-dark { font-size: 1rem; }
+
+    /* ── Progress bar ────────────────────────────────── */
+    .progress-bar {
+      position: fixed; top: 52px; left: 0; right: 0;
+      height: 2px; background: var(--border); z-index: 199;
+      transition: background .3s;
+    }
+    .progress-fill {
+      height: 100%; background: var(--accent2); width: 0%;
+      transition: width .25s ease-out;
+    }
+
+    /* ── Card viewport ────────────────────────────────── */
+    .card-stack {
+      position: fixed;
+      top: 54px; left: 0; right: 0; bottom: 0;
+      overflow: hidden;
+    }
+
+    /* ── Each card ────────────────────────────────────── */
+    .card-slide {
+      position: absolute; inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      transition: background .3s;
+      will-change: transform;
+      /* no transform set here — JS manages translateY */
+    }
+
+    /* scrollable inner if content overflows */
+    .card-inner {
+      width: 100%;
+      max-width: min(65ch, 92vw);
+      max-height: 100%;
+      padding: 20px 4px 44px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .card-inner::-webkit-scrollbar { display: none; }
+
+    /* ── Text card ────────────────────────────────────── */
+    .card-text .card-inner {
+      line-height: 1.82;
+      letter-spacing: .008em;
+      word-spacing: .04em;
+    }
+    .card-text p            { margin-bottom: 1.05em; hyphens: auto; -webkit-hyphens: auto; }
+    .card-text p:last-child { margin-bottom: 0; }
+    .card-text h5, .card-text h6 {
+      font-family: 'Inter', sans-serif;
+      font-size: .85em; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em;
+      color: var(--muted); margin-bottom: .5em;
+    }
+    .card-text blockquote {
+      border-left: 3px solid var(--accent2);
+      padding-left: 1.1em; margin: .5em 0;
+      color: var(--muted); font-style: italic;
+    }
+    .card-text ul, .card-text ol { padding-left: 1.4em; }
+    .card-text li  { margin-bottom: .3em; }
+    .card-text em  { font-style: italic; }
+    .card-text strong { font-weight: 600; }
+
+    /* ── Chapter card ─────────────────────────────────── */
+    .card-chapter { background: var(--chapter-bg) !important; }
+    .card-chapter .card-inner {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; gap: 14px; min-height: 60dvh;
+    }
+    .ch-num {
+      font-family: 'Inter', sans-serif;
+      font-size: .7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .18em;
+      color: var(--accent2);
+    }
+    .card-chapter h1, .card-chapter h2 {
+      font-size: clamp(1.45rem, 5.5vw, 2.1rem);
+      font-weight: 600; line-height: 1.2;
+      color: var(--chapter-text);
+    }
+    .ch-line { width: 36px; height: 2px; background: var(--accent2); border-radius: 2px; }
+
+    /* ── Heading card ─────────────────────────────────── */
+    .card-heading .card-inner {
+      text-align: center;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      min-height: 30dvh; justify-content: center;
+    }
+    .card-heading h3, .card-heading h4 {
+      font-size: 1.15rem; font-weight: 600; line-height: 1.3;
+      color: var(--text-h);
+    }
+    .heading-ornament { width: 28px; height: 2px; background: var(--accent2); border-radius: 2px; }
+
+    /* ── Divider card ─────────────────────────────────── */
+    .card-divider .card-inner {
+      text-align: center; min-height: 20dvh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .divider-mark {
+      font-family: 'Lora', serif; font-size: 1.1rem;
+      color: var(--muted); letter-spacing: .5em;
+    }
+
+    /* ── Nav buttons (desktop) ───────────────────────── */
+    .nav-corner {
+      position: fixed; bottom: max(20px, env(safe-area-inset-bottom, 20px)); right: 16px;
+      display: flex; flex-direction: column; gap: 6px; z-index: 300;
+    }
+    .nav-btn {
+      width: 38px; height: 38px;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 10px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .95rem; color: var(--muted);
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .nav-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--accent2); }
+    @media (pointer: coarse) { .nav-corner { display: none; } }
+
+    /* ── Swipe hint ───────────────────────────────────── */
+    .swipe-hint {
+      position: fixed;
+      bottom: max(18px, env(safe-area-inset-bottom, 18px));
+      left: 50%; transform: translateX(-50%);
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 20px; padding: 6px 16px;
+      font-family: 'Inter', sans-serif; font-size: .72rem; color: var(--muted);
+      z-index: 300; white-space: nowrap; pointer-events: none;
+      transition: opacity .5s; user-select: none;
+    }
+    .swipe-hint.gone { opacity: 0; }
+
+    /* ── Toast (font size) ───────────────────────────── */
+    .toast {
+      position: fixed; top: 62px; left: 50%; transform: translateX(-50%);
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 6px 16px;
+      font-family: 'Inter', sans-serif; font-size: .8rem; color: var(--text);
+      z-index: 400; white-space: nowrap; pointer-events: none;
+      opacity: 0; transition: opacity .25s;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<nav class="toolbar" id="toolbar">
+  <a href="/" class="btn-icon btn-back" title="Início">←</a>
+  <div class="toolbar-center">
+    <div class="tb-book" id="tb-book">{{ book.title }}</div>
+    <div class="tb-chapter" id="tb-chapter"></div>
+  </div>
+  <div class="toolbar-right">
+    <div class="tb-counter" id="tb-counter"></div>
+    <button class="btn-icon" id="btn-fs-down" title="Fonte menor">A−</button>
+    <button class="btn-icon" id="btn-fs-up"   title="Fonte maior">A+</button>
+    <button class="btn-icon" id="btn-dark">☽</button>
+  </div>
+</nav>
+
+<div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+
+<div class="card-stack" id="card-stack">
+  <div class="card-slide" id="card-a"></div>
+  <div class="card-slide" id="card-b" style="transform:translateY(100%)"></div>
+</div>
+
+<div class="nav-corner">
+  <button class="nav-btn" id="btn-prev" title="Anterior (↑)">↑</button>
+  <button class="nav-btn" id="btn-next" title="Próximo (↓ / Espaço)">↓</button>
+</div>
+
+<div class="swipe-hint" id="swipe-hint">↑ deslize para avançar</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  // ── Data ────────────────────────────────────────────────────────
+  const SECTIONS   = {{ book.sections | tojson }};
+  const BOOK_ID    = {{ book.id | tojson }};
+  const BOOK_TITLE = {{ book.title | tojson }};
+  const COOKIE_KEY = 'card_' + BOOK_ID;
+  const YEAR_MS    = 365 * 24 * 60 * 60 * 1000;
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const setCookie = (k, v, ms) =>
+    (document.cookie = `${k}=${encodeURIComponent(v)};expires=${new Date(Date.now()+ms).toUTCString()};path=/;SameSite=Lax`);
+  const getCookie = k => {
+    const m = document.cookie.match(new RegExp('(?:^|; )' + k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+
+  // ── Theme ────────────────────────────────────────────────────────
+  const html = document.documentElement;
+  let dark = localStorage.getItem('readerDark') === '1'
+    || (localStorage.getItem('readerDark') === null && matchMedia('(prefers-color-scheme:dark)').matches);
+  const applyTheme = () => {
+    html.classList.toggle('dark', dark);
+    $('btn-dark').textContent = dark ? '☀' : '☽';
+    localStorage.setItem('readerDark', dark ? '1' : '0');
+  };
+  applyTheme();
+  $('btn-dark').addEventListener('click', () => { dark = !dark; applyTheme(); });
+
+  // ── Font size ─────────────────────────────────────────────────────
+  let fs = parseInt(localStorage.getItem('readerFs') || '19', 10);
+  let toastTimer;
+  const showToast = msg => {
+    $('toast').textContent = msg;
+    $('toast').classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => $('toast').classList.remove('show'), 1400);
+  };
+  const applyFs = () => {
+    html.style.setProperty('--fs', fs + 'px');
+    localStorage.setItem('readerFs', fs);
+    showToast(`Fonte: ${fs}px`);
+  };
+  html.style.setProperty('--fs', fs + 'px'); // silent apply on load
+  $('btn-fs-up').addEventListener('click',   () => { if (fs < 28) { fs++; applyFs(); } });
+  $('btn-fs-down').addEventListener('click', () => { if (fs > 14) { fs--; applyFs(); } });
+
+  // ── Card building ──────────────────────────────────────────────────
+  // Splits a long text at sentence boundaries, max `maxLen` chars per chunk
+  function splitBySentence(text, maxLen) {
+    // Try to split at end-of-sentence punctuation followed by space + uppercase
+    const raw = text.match(/[^.!?…]+[.!?…]+["»]?\s*/g) || [text];
+    const chunks = [];
+    let cur = '';
+    for (const s of raw) {
+      if (cur && cur.length + s.length > maxLen) { chunks.push(cur.trimEnd()); cur = s; }
+      else cur += s;
+    }
+    if (cur.trim()) chunks.push(cur.trim());
+    return chunks.length ? chunks : [text];
+  }
+
+  function buildCards() {
+    const cards = [];
+    let chapterTitle = '';
+    let chapterCount = 0;
+
+    for (const section of SECTIONS) {
+      if (!section.html) continue;
+
+      // Parse section HTML
+      const doc  = new DOMParser().parseFromString(section.html, 'text/html');
+      const body = doc.body;
+
+      // Collect top-level semantic block nodes (avoid nested duplicates)
+      const SELS = 'p, h1, h2, h3, h4, h5, h6, blockquote, hr, ul, ol, figure';
+      let nodes = Array.from(body.querySelectorAll(SELS));
+      nodes = nodes.filter(n => {
+        let p = n.parentElement;
+        while (p && p !== body) { if (nodes.includes(p)) return false; p = p.parentElement; }
+        return true;
+      });
+
+      // Fallback: plain text split
+      if (!nodes.length) {
+        const text = body.textContent.trim();
+        if (!text) continue;
+        for (const chunk of splitBySentence(text, 580))
+          cards.push({ type: 'text', html: `<p>${chunk}</p>`, chapter: chapterTitle });
+        continue;
+      }
+
+      let buf = [], bufLen = 0;
+      const LIMIT     = 580; // max chars in a text card
+      const DIAL_MAX  = 110; // short lines = dialogue → group them
+
+      const flush = () => {
+        if (buf.length) { cards.push({ type: 'text', html: buf.join(''), chapter: chapterTitle }); }
+        buf = []; bufLen = 0;
+      };
+
+      for (const node of nodes) {
+        const tag  = node.tagName;
+        const text = node.textContent.trim();
+
+        if (!text && tag !== 'HR') continue;
+
+        // ── Scene break ──
+        if (tag === 'HR') {
+          flush();
+          cards.push({ type: 'divider', chapter: chapterTitle });
+          continue;
+        }
+
+        // ── Chapter title (h1 / h2) → standalone card with dark bg ──
+        if (tag === 'H1' || tag === 'H2') {
+          flush();
+          chapterTitle = text;
+          chapterCount++;
+          cards.push({ type: 'chapter', html: node.outerHTML, chapter: text, num: chapterCount });
+          continue;
+        }
+
+        // ── Sub-heading (h3 / h4) → standalone, centered card ──
+        if (tag === 'H3' || tag === 'H4') {
+          flush();
+          cards.push({ type: 'heading', html: node.outerHTML, chapter: chapterTitle });
+          continue;
+        }
+
+        // ── h5 / h6 → treat as inline bold label, merge into buffer ──
+        if (tag === 'H5' || tag === 'H6') {
+          if (bufLen + text.length > LIMIT && buf.length) flush();
+          buf.push(node.outerHTML); bufLen += text.length;
+          continue;
+        }
+
+        // ── Paragraph too long → split ──
+        if (text.length > 700) {
+          flush();
+          for (const chunk of splitBySentence(text, 560))
+            cards.push({ type: 'text', html: `<p>${chunk}</p>`, chapter: chapterTitle });
+          continue;
+        }
+
+        // ── Dialogue / very short paragraph → group until limit ──
+        if (text.length <= DIAL_MAX) {
+          if (bufLen + text.length > LIMIT && buf.length) flush();
+          buf.push(node.outerHTML); bufLen += text.length;
+          continue;
+        }
+
+        // ── Normal paragraph ──
+        // If adding would exceed limit AND there's already content, flush first
+        if (bufLen + text.length > LIMIT && buf.length) flush();
+        buf.push(node.outerHTML);
+        bufLen += text.length;
+        // If exactly at limit after adding, flush immediately (no grouping)
+        if (bufLen >= LIMIT) flush();
+      }
+
+      flush();
+    }
+
+    return cards;
+  }
+
+  const CARDS = buildCards();
+  const TOTAL = CARDS.length;
+
+  // ── Rendering ──────────────────────────────────────────────────────
+  function renderCard(el, card) {
+    el.innerHTML = '';
+    // Reset type classes
+    el.className = 'card-slide';
+
+    const inner = document.createElement('div');
+    inner.className = 'card-inner';
+
+    if (card.type === 'chapter') {
+      el.classList.add('card-chapter');
+      inner.innerHTML = `
+        <div class="ch-num">Capítulo ${card.num}</div>
+        ${card.html}
+        <div class="ch-line"></div>`;
+    } else if (card.type === 'heading') {
+      el.classList.add('card-heading');
+      inner.innerHTML = `${card.html}<div class="heading-ornament"></div>`;
+    } else if (card.type === 'divider') {
+      el.classList.add('card-divider');
+      inner.innerHTML = '<div class="divider-mark">* &thinsp; * &thinsp; *</div>';
+    } else {
+      el.classList.add('card-text');
+      inner.innerHTML = card.html;
+    }
+
+    el.appendChild(inner);
+  }
+
+  function updateUI(idx) {
+    const card = CARDS[idx];
+    const pct  = TOTAL > 1 ? (idx / (TOTAL - 1)) * 100 : 100;
+    $('progress-fill').style.width = pct + '%';
+    $('tb-counter').textContent    = `${idx + 1} / ${TOTAL}`;
+    $('tb-chapter').textContent    = card.chapter || '';
+    $('tb-book').textContent       = BOOK_TITLE;
+  }
+
+  // ── Navigation state ───────────────────────────────────────────────
+  let front   = $('card-a');
+  let back    = $('card-b');
+  let current = 0;
+  let busy    = false;
+  const DUR   = 320; // ms
+
+  function goTo(idx, dir) {
+    if (busy || idx < 0 || idx >= TOTAL || idx === current) return;
+    busy = true;
+    setCookie(COOKIE_KEY, idx, YEAR_MS);
+
+    renderCard(back, CARDS[idx]);
+
+    // Place back card offscreen instantly (no transition)
+    back.style.transition = 'none';
+    back.style.transform  = dir > 0 ? 'translateY(100%)' : 'translateY(-100%)';
+    back.getBoundingClientRect(); // force reflow
+
+    // Animate both
+    const ease = `transform ${DUR}ms cubic-bezier(0.4,0,0.2,1)`;
+    front.style.transition = ease;
+    back.style.transition  = ease;
+    front.style.transform  = dir > 0 ? 'translateY(-100%)' : 'translateY(100%)';
+    back.style.transform   = 'translateY(0)';
+
+    setTimeout(() => {
+      // Park old front card offscreen without transition
+      front.style.transition = 'none';
+      front.style.transform  = dir > 0 ? 'translateY(100%)' : 'translateY(-100%)';
+
+      // Swap references
+      [front, back] = [back, front];
+      current = idx;
+      updateUI(current);
+      busy = false;
+    }, DUR);
+  }
+
+  const next = () => goTo(current + 1,  1);
+  const prev = () => goTo(current - 1, -1);
+
+  // ── Init ──────────────────────────────────────────────────────────
+  const saved    = parseInt(getCookie(COOKIE_KEY) || '0', 10);
+  const startIdx = (saved >= 0 && saved < TOTAL) ? saved : 0;
+
+  front.style.transform = 'translateY(0)';
+  renderCard(front, CARDS[startIdx]);
+  current = startIdx;
+  updateUI(current);
+
+  // ── Button events ─────────────────────────────────────────────────
+  $('btn-next').addEventListener('click', next);
+  $('btn-prev').addEventListener('click', prev);
+
+  // ── Keyboard ──────────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+    switch (e.code) {
+      case 'Space':
+        e.preventDefault();
+        e.shiftKey ? prev() : next();
+        break;
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown':
+        e.preventDefault(); next(); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace':
+        e.preventDefault(); prev(); break;
+    }
+  });
+
+  // ── Swipe ─────────────────────────────────────────────────────────
+  let tY0 = 0, tX0 = 0;
+  const hint = $('swipe-hint');
+  let hintGone = false;
+  const dismissHint = () => { if (!hintGone) { hintGone = true; hint.classList.add('gone'); } };
+
+  document.addEventListener('touchstart', e => {
+    tY0 = e.changedTouches[0].clientY;
+    tX0 = e.changedTouches[0].clientX;
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    const dy = tY0 - e.changedTouches[0].clientY;
+    const dx = Math.abs(tX0 - e.changedTouches[0].clientX);
+    if (Math.abs(dy) > 50 && Math.abs(dy) > dx * 1.4) {
+      dy > 0 ? next() : prev();
+      dismissHint();
+    }
+  }, { passive: true });
+
+  setTimeout(dismissHint, 4500);
+
+  // ── Toolbar auto-hide ─────────────────────────────────────────────
+  const toolbar = $('toolbar');
+  let tbTimer;
+  const showToolbar = () => {
+    toolbar.classList.remove('hidden');
+    clearTimeout(tbTimer);
+    tbTimer = setTimeout(() => toolbar.classList.add('hidden'), 3500);
+  };
+  showToolbar();
+  document.addEventListener('touchstart', showToolbar, { passive: true });
+  document.addEventListener('mousemove', showToolbar,  { passive: true });
+  document.addEventListener('keydown',   showToolbar);
+
+  // ── Recent books (localStorage) ───────────────────────────────────
+  try {
+    let r = JSON.parse(localStorage.getItem('recentBooks') || '[]');
+    r = r.filter(b => b.id !== BOOK_ID);
+    r.unshift({ id: BOOK_ID, title: BOOK_TITLE });
+    localStorage.setItem('recentBooks', JSON.stringify(r.slice(0, 10)));
+  } catch {}
+})();
+</script>
+</body>
+</html>

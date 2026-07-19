@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leitor — Abrir Livro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F7F2E8;
+      --bg2: #EDE7D9;
+      --text: #2B1D10;
+      --muted: #7A6858;
+      --border: #D8CEBE;
+      --accent: #9B6A2F;
+      --accent-hover: #7A521F;
+      --error: #C0392B;
+      --shadow: 0 4px 24px rgba(43,29,16,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1C1814;
+        --bg2: #252118;
+        --text: #E8DCC8;
+        --muted: #9A8C7A;
+        --border: #3A342C;
+        --accent: #C8956C;
+        --accent-hover: #E0AA80;
+        --shadow: 0 4px 24px rgba(0,0,0,0.40);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+    .logo {
+      font-family: 'Lora', Georgia, serif;
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+      margin-bottom: 6px;
+    }
+    .tagline {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: var(--bg2);
+      border: 2px dashed var(--border);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 480px;
+      padding: 40px 32px;
+      text-align: center;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+    }
+    .card.drag-over {
+      border-color: var(--accent);
+      box-shadow: var(--shadow);
+    }
+    .upload-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+      display: block;
+    }
+    .card h2 {
+      font-family: 'Lora', Georgia, serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .card p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .badge-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+    .badge {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .file-input-wrapper {
+      position: relative;
+    }
+    input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+    .btn-upload {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 32px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      width: 100%;
+      justify-content: center;
+    }
+    .btn-upload:hover { background: var(--accent-hover); }
+    .btn-upload:active { transform: scale(0.98); }
+    .error-msg {
+      margin-top: 16px;
+      color: var(--error);
+      font-size: 0.9rem;
+      background: rgba(192,57,43,0.08);
+      border-radius: 8px;
+      padding: 10px 16px;
+    }
+    .recent-section {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 36px;
+    }
+    .recent-section h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .recent-list { list-style: none; }
+    .recent-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--bg2);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      text-decoration: none;
+      color: var(--text);
+      border: 1px solid var(--border);
+      transition: border-color 0.15s;
+    }
+    .recent-item:hover { border-color: var(--accent); }
+    .recent-item-info { flex: 1; min-width: 0; }
+    .recent-item-title {
+      font-family: 'Lora', Georgia, serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .recent-item-progress {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .recent-item-arrow {
+      color: var(--accent);
+      font-size: 1.1rem;
+      margin-left: 12px;
+      flex-shrink: 0;
+    }
+    .progress-mini {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .progress-mini-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(247,242,232,0.85);
+      z-index: 100;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .loading-overlay { background: rgba(28,24,20,0.85); }
+    }
+    .loading-overlay.active { display: flex; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .loading-text {
+      font-family: 'Lora', serif;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">Processando livro…</div>
+  </div>
+
+  <div class="logo">📖 Leitor</div>
+  <div class="tagline">Transforme seu EPUB ou PDF em leitura agradável</div>
+
+  <div class="card" id="drop-zone">
+    <span class="upload-icon">📚</span>
+    <h2>Abrir um livro</h2>
+    <p>Arraste seu arquivo aqui ou clique para escolher</p>
+    <div class="badge-row">
+      <span class="badge">EPUB</span>
+      <span class="badge">PDF</span>
+    </div>
+    <form method="POST" action="/upload" enctype="multipart/form-data" id="upload-form">
+      <div class="file-input-wrapper">
+        <button type="button" class="btn-upload">Escolher arquivo</button>
+        <input type="file" name="file" id="file-input" accept=".epub,.pdf">
+      </div>
+    </form>
+    {% if error %}
+    <div class="error-msg">{{ error }}</div>
+    {% endif %}
+  </div>
+
+  <div class="recent-section" id="recent-section" style="display:none">
+    <h3>Lidos recentemente</h3>
+    <ul class="recent-list" id="recent-list"></ul>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('file-input');
+    const form = document.getElementById('upload-form');
+    const dropZone = document.getElementById('drop-zone');
+    const loading = document.getElementById('loading');
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        loading.classList.add('active');
+        form.submit();
+      }
+    });
+
+    // Drag and drop
+    ['dragenter', 'dragover'].forEach(ev => {
+      dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(ev => {
+      dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+      });
+    });
+    dropZone.addEventListener('drop', e => {
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!['epub', 'pdf'].includes(ext)) return;
+
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      loading.classList.add('active');
+      form.submit();
+    });
+
+    // Recent books from localStorage
+    function loadRecent() {
+      let recent = [];
+      try {
+        recent = JSON.parse(localStorage.getItem('recentBooks') || '[]');
+      } catch { return; }
+
+      if (recent.length === 0) return;
+
+      const section = document.getElementById('recent-section');
+      const list = document.getElementById('recent-list');
+      section.style.display = 'block';
+
+      recent.slice(0, 5).forEach(book => {
+        const pos = getCookie(`pos_${book.id}`);
+        const pct = pos ? parseFloat(pos) : 0;
+
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <a class="recent-item" href="/reader/${book.id}">
+            <div class="recent-item-info">
+              <div class="recent-item-title">${book.title}</div>
+              <div class="progress-mini">
+                <div class="progress-mini-fill" style="width:${pct}%"></div>
+              </div>
+              <div class="recent-item-progress">${Math.round(pct)}% lido</div>
+            </div>
+            <span class="recent-item-arrow">→</span>
+          </a>`;
+        list.appendChild(li);
+      });
+    }
+
+    function getCookie(name) {
+      const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+      return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    loadRecent();
+  </script>
+</body>
+</html>
