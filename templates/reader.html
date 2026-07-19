@@ -754,6 +754,7 @@
 
   // ── Engine control ────────────────────────────────────────────
   function cancelCurrent() {
+    _ttsGen++;   // invalida qualquer ttsSpeak() em andamento e todos os timers com gen capturado
     if (_usingEdge) {
       if (_audioSrc) { try { _audioSrc.onended=null; _audioSrc.stop(0); } catch {} _audioSrc=null; }
     } else { synth.cancel(); }
