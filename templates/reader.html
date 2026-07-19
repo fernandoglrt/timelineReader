@@ -730,6 +730,9 @@
     } else { synth.cancel(); }
   }
 
+  // Debug toast: permanece por 4s — visível no iPhone sem DevTools
+  const dbg = msg => { $('toast').textContent='[TTS] '+msg; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(()=>$('toast').classList.remove('show'), 4000); };
+
   async function ttsSpeak() {
     const gen = ++_ttsGen;
     const { text, lang, container } = ttsContext();
@@ -741,37 +744,41 @@
     $('tts-play').textContent='⏳'; $('btn-tts').textContent='⏳';
     $('tts-stop').classList.add('active');
 
-    // ── Try server TTS via Web Audio API (bypasses iOS autoplay + silent mode) ──
+    dbg(`ctx:${_audioCtx?_audioCtx.state:'null'} lang:${lang}`);
+
+    // ── Try server TTS via Web Audio API ────────────────────────────
+    let serverOk = false;
     try {
+      dbg('fetch /api/tts…');
       const resp = await fetch('/api/tts', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ text, lang: lang.split('-')[0], rate: ttsRate }),
         signal: AbortSignal.timeout(20000),
       });
       if (gen !== _ttsGen || !ttsActive) return;
-      if (!resp.ok) throw new Error('server_unavailable');
+      if (!resp.ok) throw new Error(`srv ${resp.status}`);
       const { audio, words } = await resp.json();
       if (gen !== _ttsGen || !ttsActive) return;
 
-      // Fetch audio bytes (not just a URL) so AudioContext can decode them
+      dbg('baixando mp3…');
       const audioResp = await fetch(audio);
       if (gen !== _ttsGen || !ttsActive) return;
       const arrayBuf = await audioResp.arrayBuffer();
       if (gen !== _ttsGen || !ttsActive) return;
 
+      dbg(`mp3 ${arrayBuf.byteLength}b ctx:${_audioCtx?_audioCtx.state:'null'}`);
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // Don't await resume here — we're outside user-gesture on iOS and it won't work.
-      // Context is already unlocked by the silent-buffer in ttsToggle().
       if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+
       const audioBuf = await _audioCtx.decodeAudioData(arrayBuf);
       if (gen !== _ttsGen || !ttsActive) return;
 
+      serverOk = true;
       _usingEdge = true;
       _audioSrc = _audioCtx.createBufferSource();
       _audioSrc.buffer = audioBuf;
       _audioSrc.connect(_audioCtx.destination);
 
-      // Karaoke: track playback position with rAF instead of ontimeupdate
       const t0 = _audioCtx.currentTime;
       let wIdx = 0;
       (function raf() {
@@ -786,9 +793,14 @@
         if (!ttsActive || gen !== _ttsGen) return;
         if (current < TOTAL-1) next(); else ttsStop();
       };
+      dbg('▶ Web Audio');
       _audioSrc.start(0);
 
-    } catch {
+    } catch(err) {
+      dbg('srv erro: '+(err&&err.message||err)+' → WebSpeech');
+    }
+
+    if (!serverOk) {
       // ── Fallback: Web Speech API ──────────────────────────────
       if (gen !== _ttsGen || !ttsActive) return;
       _usingEdge = false;
@@ -796,7 +808,6 @@
       utt.lang=lang; utt.rate=ttsRate;
       const voice=pickVoice(lang); if (voice) utt.voice=voice;
 
-      // Chrome bug: onend sometimes never fires — advance after estimated duration
       const estMs = Math.ceil(text.length * 14 / ttsRate) + 4000;
       let _fbTimer = setTimeout(() => {
         if (!ttsActive || synth.speaking || gen !== _ttsGen) return;
@@ -805,8 +816,9 @@
 
       utt.onboundary = e => { if (e.name==='word') highlightWord(e.charIndex); };
       utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
-      utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted') ttsStop(); };
+      utt.onerror = e => { clearTimeout(_fbTimer); dbg('WebSpeech err:'+e.error); unwrapWords(); if (e.error!=='interrupted') ttsStop(); };
       synth.cancel(); synth.speak(utt);
+      dbg('▶ WebSpeech voices:'+(synth.getVoices().length));
     }
 
     updateTtsBtn();
@@ -816,16 +828,20 @@
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
       $('btn-tts').classList.add('active');
+
+      // ① Prime Web Speech within the gesture so speak() works from async callbacks on iOS
+      try { synth.cancel(); const pr = new SpeechSynthesisUtterance(' '); pr.volume=0; pr.rate=10; synth.speak(pr); } catch {}
+
+      // ② Unlock AudioContext: resume first, then play silent buffer while context is 'running'
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // iOS Safari requires an actual audio buffer played synchronously within the
-      // user-gesture handler to unlock the AudioContext (resume() alone isn't enough).
-      try {
-        const silBuf = _audioCtx.createBuffer(1, 1, 22050);
-        const silSrc = _audioCtx.createBufferSource();
-        silSrc.buffer = silBuf; silSrc.connect(_audioCtx.destination); silSrc.start(0);
-      } catch {}
-      // Chain ttsSpeak() after resume resolves — don't fire in parallel.
-      _audioCtx.resume().then(() => ttsSpeak()).catch(() => ttsSpeak());
+      _audioCtx.resume().then(() => {
+        try {
+          const silBuf = _audioCtx.createBuffer(1, 1, 22050);
+          const silSrc = _audioCtx.createBufferSource();
+          silSrc.buffer = silBuf; silSrc.connect(_audioCtx.destination); silSrc.start(0);
+        } catch {}
+        return ttsSpeak();
+      }).catch(() => ttsSpeak());
     } else if (ttsPaused) {
       if (_usingEdge) { _audioCtx && _audioCtx.resume().catch(() => {}); } else synth.resume();
       ttsPaused=false; updateTtsBtn();
