@@ -93,6 +93,9 @@
       font-family: 'Inter', sans-serif; font-size: .7rem; font-weight: 600;
       color: var(--muted); white-space: nowrap; padding: 0 5px;
     }
+    .tb-counter.two-line {
+      white-space: normal; text-align: right; line-height: 1.3;
+    }
 
     /* ── Progress ─────────────────────────────────────── */
     .progress-bar {
@@ -572,6 +575,18 @@
   const CARDS = buildCards();
   const TOTAL = CARDS.length;
 
+  // Compute char offsets for estimated page numbers (EPUB)
+  const PAGE_SIZE = 1800;   // ~chars per printed page
+  let _off = 0;
+  for (const card of CARDS) {
+    const len = card.html ? card.html.replace(/<[^>]+>/g, '').length : 0;
+    card.charOffset = _off;
+    card.charLen    = len;
+    _off += len;
+  }
+  const TOTAL_CHARS     = _off;
+  const TOTAL_PAGES_EST = Math.max(1, Math.ceil(TOTAL_CHARS / PAGE_SIZE));
+
   // Plain-text extraction per card (for TTS)
   function cardText(idx) {
     const tmp = document.createElement('div');
@@ -602,14 +617,21 @@
   }
 
   function updateUI(idx) {
-    const card = CARDS[idx];
-    const pct  = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
+    const card    = CARDS[idx];
+    const pct     = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
+    const counter = $('tb-counter');
     $('progress-fill').style.width = pct+'%';
 
     if (BOOK_FORMAT === 'pdf' && card.sectionIdx) {
-      $('tb-counter').textContent = `Pág. ${card.sectionIdx} / ${TOTAL_SECTIONS}`;
+      counter.className   = 'tb-counter';
+      counter.textContent = `Pág. ${card.sectionIdx} / ${TOTAL_SECTIONS}`;
+    } else if (BOOK_FORMAT === 'epub' && card.sectionIdx) {
+      const estPage = Math.max(1, Math.ceil((card.charOffset + card.charLen / 2) / PAGE_SIZE));
+      counter.className = 'tb-counter two-line';
+      counter.innerHTML  = `Seç. ${card.sectionIdx} / ${TOTAL_SECTIONS}<br>~Pág. ${estPage} / ${TOTAL_PAGES_EST}`;
     } else {
-      $('tb-counter').textContent = `${idx+1} / ${TOTAL}`;
+      counter.className   = 'tb-counter';
+      counter.textContent = `${idx+1} / ${TOTAL}`;
     }
 
     $('tb-chapter').textContent = card.chapter||'';
