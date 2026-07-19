@@ -1198,6 +1198,9 @@
     syncTTSFromISO(toIso);   // atualiza seletor de TTS para refletir o idioma da tradução
     $('btn-xlat').classList.add('active');
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+    // Pré-carrega +1 e +2 em background para navegação fluida
+    setTimeout(() => prefetchTranslation(current + 1), 400);
+    setTimeout(() => prefetchTranslation(current + 2), 1200);
   }
 
   function revertTranslation() {
@@ -1205,6 +1208,33 @@
     translatedNow = false; _translatedLang = null; autoTranslate = false;
     $('btn-xlat').classList.remove('active');
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+  }
+
+  // Extrai texto de um card para tradução (preserva quebras de bloco)
+  function _cardTextForTranslation(idx) {
+    if (idx < 0 || idx >= TOTAL) return '';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = CARDS[idx].html || '';
+    const blocks = Array.from(tmp.querySelectorAll('p,li,blockquote,h1,h2,h3,h4,h5,h6'));
+    return blocks.length > 1
+      ? blocks.map(b => b.textContent.trim()).filter(t => t).join('\n\n')
+      : tmp.textContent.trim();
+  }
+
+  // Pré-carrega tradução em background sem renderizar nada
+  async function prefetchTranslation(idx) {
+    if (idx < 0 || idx >= TOTAL) return;
+    const to       = $('target-lang').value;
+    const fromBase = BOOK_LANG !== 'unknown' ? BOOK_LANG.split('-')[0] : null;
+    if (fromBase && fromBase === to.split('-')[0]) return;
+    const cacheKey = `${idx}_${to}`;
+    if (cache[cacheKey]) return;
+    const text = _cardTextForTranslation(idx);
+    if (!text) return;
+    try {
+      const from = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
+      cache[cacheKey] = await fetchTranslation(text, from, to);
+    } catch {}  // silencioso — é prefetch
   }
 
   async function translateCard(idx) {
@@ -1218,13 +1248,7 @@
       return;
     }
 
-    // Extrair parágrafos separados para preservar quebras de linha na tradução
-    const _tmp = document.createElement('div');
-    _tmp.innerHTML = CARDS[idx].html || '';
-    const _blocks = Array.from(_tmp.querySelectorAll('p,li,blockquote,h1,h2,h3,h4,h5,h6'));
-    const text = _blocks.length > 1
-      ? _blocks.map(b => b.textContent.trim()).filter(t => t).join('\n\n')
-      : _tmp.textContent.trim();
+    const text = _cardTextForTranslation(idx);
     if (!text) return;
 
     const cacheKey = `${idx}_${to}`;
