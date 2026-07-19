@@ -279,35 +279,186 @@
       outline: 1px solid rgba(200,149,108,.18);
       transition: background .08s;
     }
+
+    /* ───────────────────────── F9 Reader — Redesign ──────────────── */
+    :root { --bar-h: 68px; --play-sz: 52px; }
+
+    /* F9 back badge */
+    .f9-back {
+      display: flex; align-items: center; padding: 4px 6px;
+      text-decoration: none; border-radius: 8px; flex-shrink: 0;
+      transition: background .15s;
+    }
+    .f9-back:hover { background: var(--bg3); }
+    .f9-badge {
+      font-family: 'Inter', sans-serif; font-size: .7rem; font-weight: 800;
+      letter-spacing: .06em; color: #fff;
+      background: var(--accent); border-radius: 6px;
+      padding: 3px 8px; line-height: 1.5;
+    }
+
+    /* Bottom bar — taller */
+    .bottom-bar {
+      height: calc(var(--bar-h) + env(safe-area-inset-bottom,0px)) !important;
+      padding: 0 10px !important; gap: 4px !important;
+    }
+    .card-stack {
+      bottom: calc(var(--bar-h) + env(safe-area-inset-bottom,0px)) !important;
+    }
+
+    /* Nav arrows — bigger */
+    .bar-nav {
+      width: 50px !important; height: 50px !important;
+      font-size: 2rem !important; border-radius: 14px !important;
+      color: var(--text) !important;
+    }
+
+    /* Play button — filled circle */
+    .bar-play {
+      width: var(--play-sz) !important; height: var(--play-sz) !important;
+      background: var(--accent) !important; color: #fff !important;
+      border-radius: 50% !important; font-size: 1.25rem !important;
+      box-shadow: 0 3px 14px rgba(155,106,47,.4);
+      transition: background .18s, transform .1s, box-shadow .2s !important;
+      border: none !important;
+    }
+    .bar-play:hover { background: var(--accent2) !important; transform: scale(1.06); }
+    .bar-play:active { transform: scale(.92) !important; }
+    .bar-play.active {
+      background: var(--accent2) !important;
+      box-shadow: 0 2px 20px rgba(200,149,108,.55);
+    }
+
+    /* Speed badge */
+    .bar-speed {
+      font-family: 'Inter', sans-serif; font-size: .72rem; font-weight: 700;
+      color: var(--muted); background: var(--bg3);
+      border: 1px solid var(--border); border-radius: 20px;
+      padding: 5px 13px; cursor: pointer; white-space: nowrap;
+      transition: all .15s; flex-shrink: 0; line-height: 1;
+    }
+    .bar-speed:hover { background: var(--border); color: var(--text); }
+
+    /* Stop — circle */
+    .bar-stop {
+      width: 34px !important; height: 34px !important;
+      font-size: .82rem !important; border-radius: 50% !important;
+    }
+
+    /* Settings trigger */
+    .btn-settings-trigger { font-size: 1.05rem !important; }
+
+    /* Progress bar — 3px gradient */
+    .progress-bar { height: 3px !important; }
+    .progress-fill {
+      background: linear-gradient(90deg, var(--accent), var(--accent2)) !important;
+    }
+
+    /* Toast — pill */
+    .toast {
+      border-radius: 22px !important; padding: 6px 18px !important;
+      font-size: .75rem !important;
+      box-shadow: 0 2px 20px rgba(0,0,0,.15) !important;
+    }
+
+    /* Karaoke — warmer underline glow */
+    .tts-active {
+      background: rgba(200,149,108,.28) !important;
+      box-shadow: 0 2px 0 -1px rgba(200,149,108,.65) !important;
+      outline: none !important;
+    }
+
+    /* Swipe hint — gentle bob */
+    @keyframes _f9bob {
+      0%,100% { transform: translateX(-50%) translateY(0); }
+      50%      { transform: translateX(-50%) translateY(-6px); }
+    }
+    .swipe-hint:not(.gone) { animation: _f9bob 2.2s ease-in-out infinite; }
+
+    /* ── Settings drawer ──────────────────────────────────────────── */
+    .drawer-overlay {
+      position: fixed; inset: 0; z-index: 490;
+      background: rgba(0,0,0,.48);
+      opacity: 0; pointer-events: none;
+      transition: opacity .3s;
+    }
+    .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+    .settings-drawer {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 495;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-radius: 20px 20px 0 0;
+      padding: 0 22px calc(28px + env(safe-area-inset-bottom,0px));
+      transform: translateY(110%);
+      transition: transform .38s cubic-bezier(.32,.72,0,1);
+      box-shadow: 0 -6px 40px rgba(0,0,0,.22);
+    }
+    .settings-drawer.open { transform: translateY(0); }
+    .drawer-handle {
+      width: 40px; height: 4px; background: var(--border);
+      border-radius: 2px; margin: 14px auto 20px;
+    }
+    .drawer-hd {
+      font-family: 'Inter', sans-serif; font-size: .62rem; font-weight: 700;
+      letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .drawer-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 0; border-bottom: 1px solid var(--border);
+    }
+    .drawer-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .drawer-lbl {
+      font-family: 'Inter', sans-serif; font-size: .85rem; font-weight: 500;
+      color: var(--text); flex: 1;
+    }
+    .drawer-sel {
+      font-family: 'Inter', sans-serif; font-size: .8rem; font-weight: 600;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 9px; color: var(--text); padding: 7px 10px; cursor: pointer;
+    }
+    .drawer-sel:focus { outline: none; border-color: var(--accent2); }
+    .btn-xlat-pill {
+      font-family: 'Inter', sans-serif; font-size: .78rem; font-weight: 600;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 9px; color: var(--muted);
+      padding: 7px 14px; cursor: pointer;
+      transition: all .15s; white-space: nowrap; flex-shrink: 0;
+    }
+    .btn-xlat-pill.active {
+      color: var(--accent2); border-color: var(--accent2);
+      background: rgba(200,149,108,.1);
+    }
+    .font-row { display: flex; align-items: center; gap: 8px; }
+    .font-step {
+      width: 36px; height: 36px; border: 1px solid var(--border);
+      background: var(--bg3); border-radius: 9px; cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .82rem; font-weight: 700;
+      color: var(--text); display: flex; align-items: center;
+      justify-content: center; transition: background .15s; flex-shrink: 0;
+    }
+    .font-step:hover { background: var(--border); }
+    .font-val {
+      font-family: 'Inter', sans-serif; font-size: .8rem; font-weight: 600;
+      color: var(--muted); min-width: 36px; text-align: center;
+    }
   </style>
 </head>
 <body>
 
 <!-- ── Toolbar ─────────────────────────────────────────── -->
 <nav class="toolbar" id="toolbar">
-  <a href="/" class="btn-icon btn-back" title="Início">←</a>
+  <a href="/" class="f9-back" title="Início"><span class="f9-badge">F9</span></a>
   <div class="toolbar-center">
     <div class="tb-book" id="tb-book">{{ book.title }}</div>
     <div class="tb-chapter" id="tb-chapter"></div>
   </div>
   <div class="toolbar-right">
     <div class="tb-counter" id="tb-counter"></div>
-    <button class="btn-icon" id="btn-tts"  title="Ler em voz alta">🔊</button>
-    <select class="tl-sel" id="target-lang" title="Traduzir para">
-      <option value="pt">PT</option>
-      <option value="en">EN</option>
-      <option value="es">ES</option>
-      <option value="fr">FR</option>
-      <option value="de">DE</option>
-      <option value="it">IT</option>
-      <option value="ja">JA</option>
-      <option value="zh-CN">ZH</option>
-      <option value="ru">RU</option>
-    </select>
-    <button class="btn-icon" id="btn-xlat" title="Traduzir card">🌐</button>
-    <button class="btn-icon" id="btn-fs-down" title="Fonte menor">A−</button>
-    <button class="btn-icon" id="btn-fs-up"   title="Fonte maior">A+</button>
+    <button class="btn-icon" id="btn-tts" title="Narrar">🔊</button>
     <button class="btn-icon" id="btn-dark">☽</button>
+    <button class="btn-icon btn-settings-trigger" id="btn-settings-open" title="Configurações">☰</button>
   </div>
 </nav>
 
@@ -324,31 +475,72 @@
 <div class="toast" id="toast"></div>
 
 <!-- ── Bottom bar (navegação + TTS, sempre visível) ────── -->
-<div class="bottom-bar">
-  <button class="bar-nav" id="btn-prev" title="Página anterior">‹</button>
+<div class="bottom-bar" id="bottom-bar">
+  <button class="bar-nav" id="btn-prev" title="Anterior">‹</button>
   <div class="bar-spacer"></div>
   <button class="bar-play" id="tts-play" title="Reproduzir / Pausar">▶</button>
-  <select class="tts-lang-sel" id="tts-lang-sel" title="Idioma">
-    <option value="pt-BR">PT</option>
-    <option value="en-US">EN</option>
-    <option value="es-ES">ES</option>
-    <option value="fr-FR">FR</option>
-    <option value="de-DE">DE</option>
-    <option value="it-IT">IT</option>
-    <option value="ja-JP">JA</option>
-    <option value="zh-CN">ZH</option>
-    <option value="ru-RU">RU</option>
-  </select>
-  <select class="tts-speed" id="tts-speed" title="Velocidade">
-    <option value="0.75">0.75×</option>
-    <option value="1" selected>1×</option>
-    <option value="1.25">1.25×</option>
-    <option value="1.5">1.5×</option>
-    <option value="2">2×</option>
-  </select>
+  <button class="bar-speed" id="speed-badge" title="Velocidade (clique para mudar)">1×</button>
   <button class="bar-stop" id="tts-stop" title="Parar narração">✕</button>
   <div class="bar-spacer"></div>
-  <button class="bar-nav" id="btn-next" title="Próxima página">›</button>
+  <button class="bar-nav" id="btn-next" title="Próxima">›</button>
+</div>
+
+<!-- ── Settings drawer ──────────────────────────────────── -->
+<div class="drawer-overlay" id="drawer-overlay"></div>
+<div class="settings-drawer" id="settings-drawer">
+  <div class="drawer-handle"></div>
+  <div class="drawer-hd">F9 Reader — Configurações</div>
+
+  <div class="drawer-row">
+    <span class="drawer-lbl">Tamanho do texto</span>
+    <div class="font-row">
+      <button class="font-step" id="btn-fs-down">A−</button>
+      <span class="font-val" id="fs-val">19px</span>
+      <button class="font-step" id="btn-fs-up">A+</button>
+    </div>
+  </div>
+
+  <div class="drawer-row">
+    <span class="drawer-lbl">Idioma da narração</span>
+    <select class="drawer-sel" id="tts-lang-sel" title="Idioma TTS">
+      <option value="pt-BR">Português</option>
+      <option value="en-US">English</option>
+      <option value="es-ES">Español</option>
+      <option value="fr-FR">Français</option>
+      <option value="de-DE">Deutsch</option>
+      <option value="it-IT">Italiano</option>
+      <option value="ja-JP">日本語</option>
+      <option value="zh-CN">中文</option>
+      <option value="ru-RU">Русский</option>
+    </select>
+  </div>
+
+  <div class="drawer-row">
+    <span class="drawer-lbl">Traduzir para</span>
+    <select class="drawer-sel" id="target-lang" title="Traduzir para">
+      <option value="pt">Português</option>
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="fr">Français</option>
+      <option value="de">Deutsch</option>
+      <option value="it">Italiano</option>
+      <option value="ja">日本語</option>
+      <option value="zh-CN">中文</option>
+      <option value="ru">Русский</option>
+    </select>
+    <button class="btn-xlat-pill" id="btn-xlat">Traduzir</button>
+  </div>
+
+  <div class="drawer-row">
+    <span class="drawer-lbl">Velocidade da narração</span>
+    <select class="drawer-sel" id="tts-speed" title="Velocidade">
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+  </div>
 </div>
 
 <script>
@@ -1062,6 +1254,42 @@
     syncTTSFromISO($('target-lang').value);
     if (autoTranslate || translatedNow) { translatedNow = false; translateCard(current); }
   });
+
+  // ── Settings drawer ──────────────────────────────────────────────
+  const _drawer  = $('settings-drawer');
+  const _overlay = $('drawer-overlay');
+  const openSettings  = () => { _drawer.classList.add('open'); _overlay.classList.add('open'); };
+  const closeSettings = () => { _drawer.classList.remove('open'); _overlay.classList.remove('open'); };
+  $('btn-settings-open').addEventListener('click', openSettings);
+  _overlay.addEventListener('click', closeSettings);
+  // Swipe down no drawer para fechar
+  let _dY0 = 0;
+  _drawer.addEventListener('touchstart', e => { _dY0 = e.touches[0].clientY; }, {passive:true});
+  _drawer.addEventListener('touchend',   e => { if (e.changedTouches[0].clientY - _dY0 > 60) closeSettings(); }, {passive:true});
+
+  // ── Speed badge — toque para ciclar velocidade ────────────────────
+  const _speedBadge = $('speed-badge');
+  const _speedSel   = $('tts-speed');
+  const _speedSteps = ['0.75','1','1.25','1.5','2'];
+  const _updateSpeedBadge = () => {
+    const v = _speedSel.value;
+    _speedBadge.textContent = (+v === 1) ? '1×' : v + '×';
+  };
+  _speedBadge.addEventListener('click', () => {
+    const i = _speedSteps.indexOf(_speedSel.value);
+    _speedSel.value = _speedSteps[(i + 1) % _speedSteps.length];
+    _speedSel.dispatchEvent(new Event('change'));
+    _updateSpeedBadge();
+  });
+  _speedSel.addEventListener('change', _updateSpeedBadge);
+  _updateSpeedBadge();
+
+  // ── Tamanho da fonte — display no drawer ─────────────────────────
+  const _fsValEl = $('fs-val');
+  const _updateFsVal = () => { if (_fsValEl) _fsValEl.textContent = fs + 'px'; };
+  $('btn-fs-up').addEventListener('click',   _updateFsVal);
+  $('btn-fs-down').addEventListener('click', _updateFsVal);
+  _updateFsVal();
 
 })();
 </script>
