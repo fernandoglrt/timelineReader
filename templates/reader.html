@@ -842,7 +842,7 @@
 
       utt.onboundary = e => { if (e.name==='word') highlightWord(e.charIndex); };
       utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
-      utt.onerror = e => { clearTimeout(_fbTimer); dbg('WebSpeech err:'+e.error); unwrapWords(); if (e.error!=='interrupted') ttsStop(); };
+      utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted'&&e.error!=='canceled') ttsStop(); };
       synth.cancel(); synth.speak(utt);
       dbg('▶ WebSpeech voices:'+(synth.getVoices().length));
     }
