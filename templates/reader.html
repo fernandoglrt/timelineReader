@@ -891,6 +891,24 @@
     if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   });
 
+  // Sincronia bidirecional: tradução ↔ TTS usam sempre o mesmo idioma.
+  // Mudar um atualiza o outro automaticamente — sem seletor duplicado.
+  function syncTTSFromISO(iso) {
+    const bcp47 = ISO_TO_BCP47[iso] || ISO_TO_BCP47[iso.split('-')[0]];
+    if (bcp47) $('tts-lang-sel').value = bcp47;
+  }
+  function syncTranslationFromBCP47(bcp47) {
+    const iso = bcp47.split('-')[0].toLowerCase();
+    if ($('target-lang').querySelector(`option[value="${iso}"]`)) $('target-lang').value = iso;
+  }
+
+  // Trocar idioma de TTS → sincroniza tradução (e re-traduz se ativo)
+  $('tts-lang-sel').addEventListener('change', e => {
+    syncTranslationFromBCP47(e.target.value);
+    if (autoTranslate || translatedNow) { translatedNow = false; translateCard(current); }
+    if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+  });
+
   // ════════════════════════════════════════════════════════════════
   // TRANSLATION — inline (replaces card text in place)
   // Primary: Google Translate unofficial · Fallback: MyMemory
@@ -932,6 +950,7 @@
     translatedNow = true;
     autoTranslate = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
+    syncTTSFromISO(toIso);   // atualiza seletor de TTS para refletir o idioma da tradução
     $('btn-xlat').classList.add('active');
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
@@ -976,8 +995,9 @@
     else translateCard(current);
   });
 
-  // Re-translate with new language if auto-translate is active
+  // Trocar idioma de tradução → sincroniza TTS (e re-traduz se ativo)
   $('target-lang').addEventListener('change', () => {
+    syncTTSFromISO($('target-lang').value);
     if (autoTranslate || translatedNow) { translatedNow = false; translateCard(current); }
   });
 
