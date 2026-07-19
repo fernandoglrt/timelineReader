@@ -248,11 +248,11 @@
     }
     .tts-speed:hover { background: var(--border); }
 
-    .tts-lang-badge {
-      font-family: 'Inter', sans-serif; font-size: .65rem; font-weight: 600;
-      color: var(--accent2); text-transform: uppercase; letter-spacing: .06em;
-      padding: 2px 7px; border: 1px solid var(--accent2);
-      border-radius: 10px; flex-shrink: 0;
+    .tts-lang-sel {
+      font-family: 'Inter', sans-serif; font-size: .72rem; font-weight: 600;
+      background: var(--bg3); border: 1px solid var(--accent2);
+      border-radius: 6px; color: var(--accent2); padding: 3px 5px; cursor: pointer;
+      flex-shrink: 0; max-width: 72px;
     }
 
     /* ── Translation drawer ───────────────────────────── */
@@ -375,7 +375,17 @@
 
 <!-- ── TTS bar ─────────────────────────────────────────── -->
 <div class="tts-bar" id="tts-bar">
-  <span class="tts-lang-badge" id="tts-lang-badge"></span>
+  <select class="tts-lang-sel" id="tts-lang-sel" title="Idioma da leitura em voz alta">
+    <option value="pt-BR">PT</option>
+    <option value="en-US">EN</option>
+    <option value="es-ES">ES</option>
+    <option value="fr-FR">FR</option>
+    <option value="de-DE">DE</option>
+    <option value="it-IT">IT</option>
+    <option value="ja-JP">JA</option>
+    <option value="zh-CN">ZH</option>
+    <option value="ru-RU">RU</option>
+  </select>
   <button class="tts-btn" id="tts-prev"  title="Card anterior">⏮</button>
   <button class="tts-btn main" id="tts-play" title="Reproduzir / Pausar">▶</button>
   <button class="tts-btn" id="tts-next"  title="Próximo card">⏭</button>
@@ -683,35 +693,61 @@
   const synth = window.speechSynthesis;
   let ttsActive=false, ttsPaused=false, ttsRate=1;
 
-  // Detect best voice for the book language
+  // ISO 639-1 → BCP-47 for TTS and translation target languages
+  const ISO_TO_BCP47 = {
+    'pt':'pt-BR','en':'en-US','es':'es-ES','fr':'fr-FR','de':'de-DE',
+    'it':'it-IT','ja':'ja-JP','zh':'zh-CN','zh-cn':'zh-CN',
+    'ru':'ru-RU','ar':'ar-SA','ko':'ko-KR','nl':'nl-NL','tr':'tr-TR',
+  };
+
+  // Voice cache — getVoices() is async on most browsers; populate eagerly and on change
+  let _voices = [];
+  function loadVoices() { _voices = synth.getVoices(); }
+  loadVoices();
+  synth.onvoiceschanged = loadVoices;
+
   function pickVoice(bcp47) {
-    const voices=synth.getVoices();
-    if (!voices.length) return null;
-    const lang2=bcp47.split('-')[0].toLowerCase();
+    if (!_voices.length) loadVoices();
+    const lower = bcp47.toLowerCase();
+    const base  = lower.split('-')[0];
+    // Prefer exact match, then same base language, then any voice
     return (
-      voices.find(v=>v.lang.toLowerCase()===bcp47.toLowerCase()) ||
-      voices.find(v=>v.lang.toLowerCase().startsWith(lang2)) ||
+      _voices.find(v => v.lang.toLowerCase() === lower) ||
+      _voices.find(v => v.lang.toLowerCase().startsWith(base)) ||
       null
     );
   }
 
+  // Resolve which text + language TTS should use right now.
+  // If the translation drawer is open AND has a cached result, read that.
+  function ttsContext() {
+    const to       = $('target-lang').value;
+    const cacheKey = `${current}_${to}`;
+    if (drawerOpen && cache[cacheKey]) {
+      const lang = ISO_TO_BCP47[to] || ISO_TO_BCP47[to.split('-')[0]] || to;
+      return { text: cache[cacheKey], lang };
+    }
+    return { text: cardText(current), lang: $('tts-lang-sel').value };
+  }
+
   function ttsSpeak() {
-    const text = cardText(current);
-    if (!text) { if(ttsActive) { next(); return; } }
+    const { text, lang } = ttsContext();
+    if (!text.trim()) { if (ttsActive) { next(); } return; }
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang  = BOOK_BCP47 !== 'unknown' ? BOOK_BCP47 : navigator.language;
-    utt.rate  = ttsRate;
+    const utt  = new SpeechSynthesisUtterance(text);
+    utt.lang   = lang;
+    utt.rate   = ttsRate;
 
-    const voice = pickVoice(utt.lang);
+    // Wait for voices if not loaded yet (happens on first load in Chrome)
+    const voice = pickVoice(lang);
     if (voice) utt.voice = voice;
 
-    utt.onend = () => {
+    utt.onend  = () => {
       if (!ttsActive) return;
-      if (current < TOTAL-1) { next(); /* goTo will call ttsSpeak via callback */ }
+      if (current < TOTAL-1) { next(); }
       else                   { ttsStop(); }
     };
-    utt.onerror = e => { if(e.error!=='interrupted') ttsStop(); };
+    utt.onerror = e => { if (e.error !== 'interrupted') ttsStop(); };
 
     synth.cancel();
     synth.speak(utt);
@@ -746,9 +782,13 @@
     $('tts-play').textContent = playing ? '⏸' : '▶';
   }
 
-  // Show detected language in badge
-  const langName = LANG_NAMES[BOOK_LANG] || BOOK_LANG.toUpperCase();
-  $('tts-lang-badge').textContent = langName || '';
+  // Pre-select detected book language in TTS language picker
+  const detectedBcp47 = BOOK_BCP47 !== 'unknown'
+    ? BOOK_BCP47
+    : (ISO_TO_BCP47[navigator.language.split('-')[0]] || 'pt-BR');
+  $('tts-lang-sel').value = detectedBcp47;
+  // If detected value isn't in the option list, fall back to pt-BR
+  if (!$('tts-lang-sel').value) $('tts-lang-sel').value = 'pt-BR';
 
   $('btn-tts').addEventListener('click', ttsToggle);
   $('tts-play').addEventListener('click', ttsToggle);
@@ -765,10 +805,7 @@
     }
   });
 
-  // Reload voices when they become available (async on some browsers)
-  if (synth.onvoiceschanged !== undefined) {
-    synth.onvoiceschanged = () => {}; // forces cache
-  }
+  // onvoiceschanged already wired above in the voice-cache section
 
   // ════════════════════════════════════════════════════════════════
   // TRANSLATION — Google Translate unofficial endpoint (free, no key)
@@ -827,6 +864,8 @@
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
       showDrawerContent(result);
+      // If TTS is running while drawer just got the translation, switch to reading it
+      if (ttsActive) { synth.cancel(); setTimeout(ttsSpeak, 60); }
     } catch(e) {
       showDrawerContent(`<em style="color:var(--muted)">${e.message}</em>`);
     }
