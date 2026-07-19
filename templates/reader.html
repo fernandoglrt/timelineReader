@@ -504,11 +504,21 @@
   const TOTAL_CHARS     = _off;
   const TOTAL_PAGES_EST = Math.max(1, Math.ceil(TOTAL_CHARS / PAGE_SIZE));
 
+  // Junta blocos de texto com pausa natural (ponto no final se não tiver pontuação)
+  function extractTextWithPauses(el) {
+    const blocks = el.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote');
+    if (blocks.length <= 1) return el.textContent.trim();
+    return Array.from(blocks).map(b => {
+      const t = b.textContent.trim();
+      return t && !/[.!?…»"']$/.test(t) ? t + '.' : t;
+    }).filter(t => t).join(' ');
+  }
+
   // Plain-text extraction per card (for TTS)
   function cardText(idx) {
     const tmp = document.createElement('div');
     tmp.innerHTML = CARDS[idx].html || '';
-    return tmp.textContent.trim();
+    return extractTextWithPauses(tmp);
   }
 
   // ── Render cards ─────────────────────────────────────────────────
@@ -586,9 +596,19 @@
 
       translatedNow = false; _translatedLang = null;
       $('btn-xlat').classList.toggle('active', autoTranslate);
-      if (autoTranslate) translateCard(current);
 
-      if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+      if (autoTranslate && ttsActive) {
+        // Espera tradução terminar antes de iniciar TTS — evita race condition
+        // onde applyTranslation() cancela o TTS que estava tocando na página certa
+        cancelCurrent();
+        translateCard(current).then(ok => {
+          // Se tradução falhou, lê texto original
+          if (!ok && ttsActive) setTimeout(ttsSpeak, 60);
+        });
+      } else {
+        if (autoTranslate) translateCard(current);
+        if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+      }
     }, DUR);
   }
 
@@ -663,7 +683,7 @@
   function ttsContext() {
     if (translatedNow && _translatedLang) {
       const inner = front.querySelector('.card-inner');
-      const text  = inner ? inner.textContent.trim() : cardText(current);
+      const text  = inner ? extractTextWithPauses(inner) : cardText(current);
       return { text, lang: _translatedLang, container: inner };
     }
     return { text: cardText(current), lang: $('tts-lang-sel').value,
@@ -983,16 +1003,19 @@
     if (!text) return;
 
     const cacheKey = `${idx}_${to}`;
-    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); return; }
+    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); return true; }
 
     showToast('Traduzindo…');
     try {
       const from   = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
+      if (current !== idx) return false;  // página mudou enquanto traduzia — descarta
       applyTranslation(result, to);
+      return true;
     } catch {
       showToast('Erro na tradução. Tente novamente.');
+      return false;
     }
   }
 
