@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import json
 import asyncio
@@ -275,46 +276,63 @@ def reader(book_id):
 
 @app.route('/api/tts', methods=['POST'])
 def api_tts():
-    try:
-        import edge_tts as _edge
-    except ImportError:
-        abort(503)
-
     data  = request.get_json(silent=True) or {}
     text  = (data.get('text') or '').strip()[:3000]
     lang  = (data.get('lang') or 'en').split('-')[0].lower()
     rate  = float(data.get('rate', 1.0))
-
     if not text:
         abort(400)
 
-    voice    = EDGE_VOICES.get(lang, 'en-US-JennyNeural')
-    rate_pct = f"{int((rate - 1) * 100):+d}%"   # 1.0→+0%  1.5→+50%  0.75→-25%
-
-    key      = hashlib.md5(f"{voice}|{rate_pct}|{text}".encode()).hexdigest()
+    key       = hashlib.md5(f"tts2|{lang}|{rate}|{text}".encode()).hexdigest()
     mp3_path  = TTS_CACHE / f"{key}.mp3"
     json_path = TTS_CACHE / f"{key}.json"
 
     if not mp3_path.exists():
-        async def _generate():
-            communicate = _edge.Communicate(text, voice, rate=rate_pct)
-            audio_chunks, words = [], []
-            async for chunk in communicate.stream():
-                if chunk['type'] == 'audio':
-                    audio_chunks.append(chunk['data'])
-                elif chunk['type'] == 'WordBoundary':
-                    words.append({
-                        'w': chunk['text'],
-                        's': chunk['offset'] // 10000,    # 100 ns → ms
-                        'd': chunk['duration'] // 10000,
-                    })
-            mp3_path.write_bytes(b''.join(audio_chunks))
-            json_path.write_text(json.dumps(words, ensure_ascii=False))
+        words     = []
+        generated = False
 
+        # ── 1. edge-tts (neural voices + precise word timestamps) ─────
         try:
-            asyncio.run(_generate())
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            import edge_tts as _edge
+            voice    = EDGE_VOICES.get(lang, 'en-US-JennyNeural')
+            rate_pct = f"{int((rate - 1) * 100):+d}%"
+
+            async def _edge_gen():
+                communicate = _edge.Communicate(text, voice, rate=rate_pct)
+                chunks = []
+                async for chunk in communicate.stream():
+                    if chunk['type'] == 'audio':
+                        chunks.append(chunk['data'])
+                    elif chunk['type'] == 'WordBoundary':
+                        words.append({'w': chunk['text'],
+                                      's': chunk['offset'] // 10000,
+                                      'd': chunk['duration'] // 10000})
+                mp3_path.write_bytes(b''.join(chunks))
+
+            asyncio.run(_edge_gen())
+            generated = True
+        except Exception:
+            pass
+
+        # ── 2. gTTS fallback (Google TTS, leve, sem timestamps precisos) ─
+        if not generated:
+            try:
+                from gtts import gTTS
+                safe_lang = lang if lang != 'unknown' else 'en'
+                gTTS(text, lang=safe_lang, slow=False).save(str(mp3_path))
+                # Estima timings a ~140 wpm
+                raw_words = re.findall(r'\S+', text)
+                ms_each   = max(1, int(60000 / (140 * rate)))
+                words = [{'w': w, 's': i * ms_each, 'd': ms_each}
+                         for i, w in enumerate(raw_words)]
+                generated = True
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        if not generated:
+            abort(503)
+
+        json_path.write_text(json.dumps(words, ensure_ascii=False))
 
     words = json.loads(json_path.read_text()) if json_path.exists() else []
     return jsonify({'audio': f'/api/tts/audio/{key}', 'words': words})

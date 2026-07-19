@@ -564,6 +564,7 @@
   function goTo(idx, dir) {
     if (busy||idx<0||idx>=TOTAL||idx===current) return;
     busy=true;
+    if (ttsActive) cancelCurrent();   // para áudio imediatamente, sem vazar na transição
     setCookie(COOKIE_KEY, idx, YEAR_MS);
 
     renderCard(back, CARDS[idx]);
