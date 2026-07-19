@@ -815,6 +815,11 @@
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
       $('btn-tts').classList.add('active');
+      // Mobile autoplay: call play() synchronously in the user-gesture thread to
+      // "unlock" this audio element — browsers allow future play() calls even after
+      // async breaks (await fetch) once the element has been gesture-activated.
+      ttsAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      ttsAudio.play().catch(() => {});
       ttsSpeak();
     } else if (ttsPaused) {
       if (_usingEdge) ttsAudio.play(); else synth.resume();
