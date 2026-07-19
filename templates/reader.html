@@ -109,7 +109,8 @@
 
     /* ── Card stack ───────────────────────────────────── */
     .card-stack {
-      position: fixed; top: 54px; left: 0; right: 0; bottom: 0;
+      position: fixed; top: 54px; left: 0; right: 0;
+      bottom: calc(56px + env(safe-area-inset-bottom, 0px));
       overflow: hidden;
     }
     .card-slide {
@@ -180,25 +181,49 @@
       color: var(--muted); letter-spacing: .5em;
     }
 
-    /* ── Desktop nav ─────────────────────────────────── */
-    .nav-corner {
-      position: fixed; bottom: max(20px,env(safe-area-inset-bottom,20px)); right: 14px;
-      display: flex; flex-direction: column; gap: 6px; z-index: 300;
+    /* ── Bottom bar (sempre visível) ─────────────────── */
+    .bottom-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 180;
+      height: calc(56px + env(safe-area-inset-bottom, 0px));
+      padding: 0 8px;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      background: var(--bg2); border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 2px;
+      transition: background .3s;
     }
-    .nav-btn {
-      width: 36px; height: 36px; background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 9px; cursor: pointer;
+    .bar-nav {
+      background: none; border: none; cursor: pointer;
+      font-size: 1.7rem; font-weight: 300; color: var(--accent);
+      width: 46px; height: 46px; border-radius: 10px;
       display: flex; align-items: center; justify-content: center;
-      font-size: .9rem; color: var(--muted);
-      transition: background .15s, border-color .15s, color .15s;
+      transition: background .15s; flex-shrink: 0;
     }
-    .nav-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--accent2); }
-    @media (pointer: coarse) { .nav-corner { display: none; } }
+    .bar-nav:hover { background: var(--bg3); }
+    .bar-spacer { flex: 1; }
+    .bar-play {
+      background: none; border: none; cursor: pointer;
+      font-size: 1.35rem; color: var(--text);
+      width: 44px; height: 44px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s; flex-shrink: 0;
+    }
+    .bar-play:hover { background: var(--bg3); }
+    .bar-play.active { color: var(--accent2); }
+    .bar-stop {
+      background: none; border: none; cursor: pointer;
+      font-size: .8rem; color: var(--muted);
+      width: 28px; height: 28px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s, opacity .2s;
+      flex-shrink: 0; opacity: 0.25; pointer-events: none;
+    }
+    .bar-stop.active { opacity: 1; color: var(--text); pointer-events: auto; }
+    .bar-stop:hover { background: var(--bg3); }
 
     /* ── Swipe hint ───────────────────────────────────── */
     .swipe-hint {
       position: fixed;
-      bottom: max(16px,env(safe-area-inset-bottom,16px)); left: 50%;
+      bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px); left: 50%;
       transform: translateX(-50%);
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: 20px; padding: 5px 14px;
@@ -219,29 +244,7 @@
     }
     .toast.show { opacity: 1; }
 
-    /* ── TTS bottom bar ──────────────────────────────── */
-    .tts-bar {
-      position: fixed; left: 0; right: 0; z-index: 180;
-      bottom: calc(-68px - env(safe-area-inset-bottom, 0px));
-      height: calc(60px + env(safe-area-inset-bottom, 0px));
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-      background: var(--bg2); border-top: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      padding-left: 12px; padding-right: 12px;
-      transition: bottom .3s cubic-bezier(.4,0,.2,1), background .3s;
-    }
-    .tts-bar.visible {
-      bottom: 0;
-    }
-    /* When translation drawer is also open, TTS bar stays put and drawer sits above it */
-
-    .tts-btn {
-      background: none; border: none; cursor: pointer;
-      font-size: 1.2rem; padding: 6px 8px; border-radius: 8px;
-      color: var(--text); transition: background .15s;
-    }
-    .tts-btn:hover { background: var(--bg3); }
-    .tts-btn.main { font-size: 1.5rem; }
+    .tts-btn { display: none; } /* kept for compat, not used */
 
     .tts-speed {
       font-family: 'Inter', sans-serif; font-size: .75rem; font-weight: 600;
@@ -316,19 +319,16 @@
   <div class="card-slide" id="card-b" style="transform:translateY(100%)"></div>
 </div>
 
-<!-- ── Desktop nav ─────────────────────────────────────── -->
-<div class="nav-corner">
-  <button class="nav-btn" id="btn-prev">↑</button>
-  <button class="nav-btn" id="btn-next">↓</button>
-</div>
-
 <!-- ── Swipe hint ──────────────────────────────────────── -->
 <div class="swipe-hint" id="swipe-hint">↑ deslize para avançar</div>
 <div class="toast" id="toast"></div>
 
-<!-- ── TTS bar ─────────────────────────────────────────── -->
-<div class="tts-bar" id="tts-bar">
-  <select class="tts-lang-sel" id="tts-lang-sel" title="Idioma da leitura em voz alta">
+<!-- ── Bottom bar (navegação + TTS, sempre visível) ────── -->
+<div class="bottom-bar">
+  <button class="bar-nav" id="btn-prev" title="Página anterior">‹</button>
+  <div class="bar-spacer"></div>
+  <button class="bar-play" id="tts-play" title="Reproduzir / Pausar">▶</button>
+  <select class="tts-lang-sel" id="tts-lang-sel" title="Idioma">
     <option value="pt-BR">PT</option>
     <option value="en-US">EN</option>
     <option value="es-ES">ES</option>
@@ -339,9 +339,6 @@
     <option value="zh-CN">ZH</option>
     <option value="ru-RU">RU</option>
   </select>
-  <button class="tts-btn" id="tts-prev"  title="Card anterior">⏮</button>
-  <button class="tts-btn main" id="tts-play" title="Reproduzir / Pausar">▶</button>
-  <button class="tts-btn" id="tts-next"  title="Próximo card">⏭</button>
   <select class="tts-speed" id="tts-speed" title="Velocidade">
     <option value="0.75">0.75×</option>
     <option value="1" selected>1×</option>
@@ -349,7 +346,9 @@
     <option value="1.5">1.5×</option>
     <option value="2">2×</option>
   </select>
-  <button class="tts-btn" id="tts-stop" title="Parar">✕</button>
+  <button class="bar-stop" id="tts-stop" title="Parar narração">✕</button>
+  <div class="bar-spacer"></div>
+  <button class="bar-nav" id="btn-next" title="Próxima página">›</button>
 </div>
 
 <script>
@@ -604,9 +603,6 @@
   current=startIdx;
   updateUI(current);
 
-  $('btn-next').addEventListener('click', next);
-  $('btn-prev').addEventListener('click', prev);
-
   // ── Keyboard ──────────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
     if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
@@ -630,13 +626,7 @@
   },{passive:true});
   setTimeout(dismissHint,4500);
 
-  // ── Toolbar auto-hide ─────────────────────────────────────────────
-  const toolbar=$('toolbar'); let tbTimer;
-  const showToolbar=()=>{ toolbar.classList.remove('hidden'); clearTimeout(tbTimer); tbTimer=setTimeout(()=>toolbar.classList.add('hidden'),3500); };
-  showToolbar();
-  document.addEventListener('touchstart', showToolbar,{passive:true});
-  document.addEventListener('mousemove',  showToolbar,{passive:true});
-  document.addEventListener('keydown',    showToolbar);
+  // Toolbar sempre visível
 
   // ── Recent books ──────────────────────────────────────────────────
   try {
@@ -751,6 +741,7 @@
     if (container) wrapWords(container);
 
     $('tts-play').textContent='⏳'; $('btn-tts').textContent='⏳';
+    $('tts-stop').classList.add('active');
 
     // ── Try Edge TTS (server) ─────────────────────────────────
     try {
@@ -805,7 +796,7 @@
   function ttsToggle() {
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
-      $('tts-bar').classList.add('visible'); $('btn-tts').classList.add('active');
+      $('btn-tts').classList.add('active');
       ttsSpeak();
     } else if (ttsPaused) {
       if (_usingEdge) ttsAudio.play(); else synth.resume();
@@ -819,14 +810,19 @@
   function ttsStop() {
     cancelCurrent(); unwrapWords();
     ttsActive=false; ttsPaused=false; _usingEdge=false;
-    $('tts-bar').classList.remove('visible'); $('btn-tts').classList.remove('active');
-    $('btn-tts').textContent='🔊'; $('tts-play').textContent='▶';
+    $('btn-tts').classList.remove('active');
+    $('btn-tts').textContent='🔊';
+    $('tts-play').textContent='▶';
+    $('tts-play').classList.remove('active');
+    $('tts-stop').classList.remove('active');
   }
 
   function updateTtsBtn() {
     const playing = ttsActive && !ttsPaused;
     $('btn-tts').textContent  = playing ? '⏸' : (ttsActive ? '▶' : '🔊');
     $('tts-play').textContent = playing ? '⏸' : '▶';
+    $('tts-play').classList.toggle('active', ttsActive);
+    $('tts-stop').classList.toggle('active', ttsActive);
   }
 
   const detectedBcp47 = BOOK_BCP47!=='unknown' ? BOOK_BCP47 : (ISO_TO_BCP47[navigator.language.split('-')[0]]||'pt-BR');
@@ -836,8 +832,8 @@
   $('btn-tts').addEventListener('click', ttsToggle);
   $('tts-play').addEventListener('click', ttsToggle);
   $('tts-stop').addEventListener('click', ttsStop);
-  $('tts-prev').addEventListener('click', () => { cancelCurrent(); prev(); });
-  $('tts-next').addEventListener('click', () => { cancelCurrent(); next(); });
+  $('btn-prev').addEventListener('click', prev);
+  $('btn-next').addEventListener('click', next);
   $('tts-speed').addEventListener('change', e => {
     ttsRate=parseFloat(e.target.value);
     if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
