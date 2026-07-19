@@ -1,8 +1,10 @@
 import os
 import uuid
 import json
+import asyncio
+import hashlib
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, abort
+from flask import Flask, render_template, request, redirect, url_for, abort, send_file, jsonify
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = Path('uploads')
@@ -12,8 +14,26 @@ app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 
 ALLOWED_EXTENSIONS = {'.epub', '.pdf'}
 
-for folder in (app.config['UPLOAD_FOLDER'], app.config['BOOKS_FOLDER']):
+TTS_CACHE = Path('tts_cache')
+
+for folder in (app.config['UPLOAD_FOLDER'], app.config['BOOKS_FOLDER'], TTS_CACHE):
     folder.mkdir(exist_ok=True)
+
+# Edge TTS neural voices per language (ISO 639-1)
+EDGE_VOICES = {
+    'pt': 'pt-BR-FranciscaNeural',
+    'en': 'en-US-JennyNeural',
+    'es': 'es-ES-ElviraNeural',
+    'fr': 'fr-FR-DeniseNeural',
+    'de': 'de-DE-KatjaNeural',
+    'it': 'it-IT-ElsaNeural',
+    'ja': 'ja-JP-NanamiNeural',
+    'zh': 'zh-CN-XiaoxiaoNeural',
+    'ru': 'ru-RU-SvetlanaNeural',
+    'ar': 'ar-SA-ZariyahNeural',
+    'ko': 'ko-KR-SunHiNeural',
+    'nl': 'nl-NL-ColetteNeural',
+}
 
 # BCP-47 tags for Web Speech API, keyed by ISO 639-1 code
 LANG_BCP47 = {
@@ -251,6 +271,63 @@ def reader(book_id):
         book = json.load(f)
 
     return render_template('reader.html', book=book)
+
+
+@app.route('/api/tts', methods=['POST'])
+def api_tts():
+    try:
+        import edge_tts as _edge
+    except ImportError:
+        abort(503)
+
+    data  = request.get_json(silent=True) or {}
+    text  = (data.get('text') or '').strip()[:3000]
+    lang  = (data.get('lang') or 'en').split('-')[0].lower()
+    rate  = float(data.get('rate', 1.0))
+
+    if not text:
+        abort(400)
+
+    voice    = EDGE_VOICES.get(lang, 'en-US-JennyNeural')
+    rate_pct = f"{int((rate - 1) * 100):+d}%"   # 1.0→+0%  1.5→+50%  0.75→-25%
+
+    key      = hashlib.md5(f"{voice}|{rate_pct}|{text}".encode()).hexdigest()
+    mp3_path  = TTS_CACHE / f"{key}.mp3"
+    json_path = TTS_CACHE / f"{key}.json"
+
+    if not mp3_path.exists():
+        async def _generate():
+            communicate = _edge.Communicate(text, voice, rate=rate_pct)
+            audio_chunks, words = [], []
+            async for chunk in communicate.stream():
+                if chunk['type'] == 'audio':
+                    audio_chunks.append(chunk['data'])
+                elif chunk['type'] == 'WordBoundary':
+                    words.append({
+                        'w': chunk['text'],
+                        's': chunk['offset'] // 10000,    # 100 ns → ms
+                        'd': chunk['duration'] // 10000,
+                    })
+            mp3_path.write_bytes(b''.join(audio_chunks))
+            json_path.write_text(json.dumps(words, ensure_ascii=False))
+
+        try:
+            asyncio.run(_generate())
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    words = json.loads(json_path.read_text()) if json_path.exists() else []
+    return jsonify({'audio': f'/api/tts/audio/{key}', 'words': words})
+
+
+@app.route('/api/tts/audio/<key>')
+def api_tts_audio(key):
+    if len(key) != 32 or not all(c in '0123456789abcdef' for c in key):
+        abort(404)
+    path = TTS_CACHE / f"{key}.mp3"
+    if not path.exists():
+        abort(404)
+    return send_file(path, mimetype='audio/mpeg')
 
 
 if __name__ == '__main__':

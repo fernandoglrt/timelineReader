@@ -588,11 +588,7 @@
       translatedNow = false;
       $('btn-xlat').classList.remove('active');
 
-      // Continue TTS on new card if active
-      if (ttsActive) {
-        synth.cancel();
-        setTimeout(ttsSpeak, 60);
-      }
+      if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
     }, DUR);
   }
 
@@ -650,175 +646,180 @@
   } catch {}
 
   // ════════════════════════════════════════════════════════════════
-  // TTS — Web Speech API (built into the browser, free, zero weight)
+  // TTS — Edge TTS (servidor, vozes neurais) + Web Speech fallback
   // ════════════════════════════════════════════════════════════════
+  const ttsAudio = new Audio();
+  ttsAudio.preload = 'none';
   const synth = window.speechSynthesis;
-  let ttsActive=false, ttsPaused=false, ttsRate=1;
+  let ttsActive=false, ttsPaused=false, ttsRate=1, _usingEdge=false, _ttsGen=0;
 
-  // ISO 639-1 → BCP-47 for TTS and translation target languages
   const ISO_TO_BCP47 = {
     'pt':'pt-BR','en':'en-US','es':'es-ES','fr':'fr-FR','de':'de-DE',
     'it':'it-IT','ja':'ja-JP','zh':'zh-CN','zh-cn':'zh-CN',
     'ru':'ru-RU','ar':'ar-SA','ko':'ko-KR','nl':'nl-NL','tr':'tr-TR',
   };
 
-  // Voice cache — getVoices() is async on most browsers; populate eagerly and on change
+  // Web Speech voices (used as fallback only)
   let _voices = [];
   function loadVoices() { _voices = synth.getVoices(); }
-  loadVoices();
-  synth.onvoiceschanged = loadVoices;
-
+  loadVoices(); synth.onvoiceschanged = loadVoices;
   function pickVoice(bcp47) {
     if (!_voices.length) loadVoices();
-    const lower = bcp47.toLowerCase();
-    const base  = lower.split('-')[0];
-    // Prefer exact match, then same base language, then any voice
-    return (
-      _voices.find(v => v.lang.toLowerCase() === lower) ||
-      _voices.find(v => v.lang.toLowerCase().startsWith(base)) ||
-      null
-    );
+    const lo = bcp47.toLowerCase(), base = lo.split('-')[0];
+    return _voices.find(v => v.lang.toLowerCase() === lo)
+        || _voices.find(v => v.lang.toLowerCase().startsWith(base)) || null;
   }
 
-  // Resolve which text + language TTS should use right now.
   function ttsContext() {
-    const to       = $('target-lang').value;
-    const cacheKey = `${current}_${to}`;
-    if (translatedNow && cache[cacheKey]) {
+    const to = $('target-lang').value, ck = `${current}_${to}`;
+    if (translatedNow && cache[ck]) {
       const lang = ISO_TO_BCP47[to] || ISO_TO_BCP47[to.split('-')[0]] || to;
-      return { text: cache[cacheKey], lang, container: front.querySelector('.card-inner') };
+      return { text: cache[ck], lang, container: front.querySelector('.card-inner') };
     }
-    return {
-      text: cardText(current),
-      lang: $('tts-lang-sel').value,
-      container: front.querySelector('.card-inner'),
-    };
+    return { text: cardText(current), lang: $('tts-lang-sel').value,
+             container: front.querySelector('.card-inner') };
   }
 
-  // ── Karaoke word wrapping ────────────────────────────────────────
-  let wordSpans = [];   // DOM spans in current TTS target
-  let activeSpan = null;
+  // ── Karaoke ───────────────────────────────────────────────────
+  let wordSpans=[], activeSpan=null, spanSeqIdx=-1;
 
   function wrapWords(container) {
-    wordSpans = [];
-    let offset = 0;
-
+    wordSpans=[]; spanSeqIdx=-1;
+    let offset=0;
     function walk(node) {
-      if (node.nodeType === 3) {           // TEXT_NODE
-        const t = node.textContent;
-        const tokens = t.split(/(\s+)/);
-        const frag = document.createDocumentFragment();
+      if (node.nodeType===3) {
+        const tokens=node.textContent.split(/(\s+)/);
+        const frag=document.createDocumentFragment();
         for (const tok of tokens) {
           if (!tok) continue;
           if (/\S/.test(tok)) {
-            const sp = document.createElement('span');
-            sp.className = 'tts-w';
-            sp._s = offset;              // char start in plain text
-            sp._e = offset + tok.length; // char end
-            sp.textContent = tok;
-            wordSpans.push(sp);
-            frag.appendChild(sp);
-          } else {
-            frag.appendChild(document.createTextNode(tok));
-          }
-          offset += tok.length;
+            const sp=document.createElement('span');
+            sp.className='tts-w'; sp._s=offset; sp._e=offset+tok.length;
+            sp.textContent=tok; wordSpans.push(sp); frag.appendChild(sp);
+          } else { frag.appendChild(document.createTextNode(tok)); }
+          offset+=tok.length;
         }
-        node.parentNode.replaceChild(frag, node);
-      } else if (node.nodeType === 1) {
-        Array.from(node.childNodes).forEach(walk);
-      }
+        node.parentNode.replaceChild(frag,node);
+      } else if (node.nodeType===1) { Array.from(node.childNodes).forEach(walk); }
     }
-
     Array.from(container.childNodes).forEach(walk);
   }
 
   function unwrapWords() {
-    for (const sp of wordSpans) {
-      if (sp.parentNode) sp.replaceWith(sp.textContent);
-    }
-    // Normalize adjacent text nodes left behind
-    if (activeSpan && activeSpan.parentNode)
-      activeSpan.parentNode.normalize();
-    wordSpans = [];
-    activeSpan = null;
+    for (const sp of wordSpans) { if (sp.parentNode) sp.replaceWith(sp.textContent); }
+    if (activeSpan?.parentNode) activeSpan.parentNode.normalize();
+    wordSpans=[]; activeSpan=null; spanSeqIdx=-1;
   }
 
+  // Web Speech: highlight by char offset
   function highlightWord(charIndex) {
     if (activeSpan) activeSpan.classList.remove('tts-active');
-    // Find span that contains charIndex
-    let found = null;
-    for (const sp of wordSpans) {
-      if (sp._s <= charIndex && sp._e > charIndex) { found = sp; break; }
-    }
-    // Fallback: nearest span starting after charIndex
-    if (!found) {
-      for (const sp of wordSpans) {
-        if (sp._s >= charIndex) { found = sp; break; }
+    const found = wordSpans.find(sp=>sp._s<=charIndex&&sp._e>charIndex)
+               || wordSpans.find(sp=>sp._s>=charIndex);
+    if (found) { found.classList.add('tts-active'); activeSpan=found; found.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+  }
+
+  // Edge TTS: highlight by word text (sequential scan, tolerates punctuation)
+  function highlightWordByText(word) {
+    if (activeSpan) activeSpan.classList.remove('tts-active');
+    const norm = s => s.replace(/[^\w]/g,'').toLowerCase();
+    const nw   = norm(word);
+    const end  = Math.min(spanSeqIdx + 10, wordSpans.length);
+    for (let i = Math.max(0, spanSeqIdx); i < end; i++) {
+      if (norm(wordSpans[i].textContent) === nw) {
+        spanSeqIdx=i+1; wordSpans[i].classList.add('tts-active'); activeSpan=wordSpans[i];
+        wordSpans[i].scrollIntoView({behavior:'smooth',block:'nearest'}); return;
       }
-    }
-    if (found) {
-      found.classList.add('tts-active');
-      activeSpan = found;
-      found.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
 
-  function ttsSpeak() {
-    const { text, lang, container } = ttsContext();
-    if (!text.trim()) { if (ttsActive) { next(); } return; }
+  // ── Engine control ────────────────────────────────────────────
+  function cancelCurrent() {
+    if (_usingEdge) {
+      ttsAudio.pause(); ttsAudio.src='';
+      ttsAudio.ontimeupdate=null; ttsAudio.onended=null; ttsAudio.onerror=null;
+    } else { synth.cancel(); }
+  }
 
-    // Wrap words for karaoke highlight
+  async function ttsSpeak() {
+    const gen = ++_ttsGen;
+    const { text, lang, container } = ttsContext();
+    if (!text.trim()) { if (ttsActive) next(); return; }
+
     unwrapWords();
     if (container) wrapWords(container);
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang  = lang;
-    utt.rate  = ttsRate;
+    $('tts-play').textContent='⏳'; $('btn-tts').textContent='⏳';
 
-    const voice = pickVoice(lang);
-    if (voice) utt.voice = voice;
+    // ── Try Edge TTS (server) ─────────────────────────────────
+    try {
+      const resp = await fetch('/api/tts', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text, lang: lang.split('-')[0], rate: ttsRate }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (gen !== _ttsGen || !ttsActive) return;
+      if (!resp.ok) throw new Error('server_unavailable');
+      const { audio, words } = await resp.json();
 
-    utt.onboundary = e => {
-      if (e.name === 'word') highlightWord(e.charIndex);
-    };
+      _usingEdge = true;
+      ttsAudio.src = audio;
+      let wIdx = 0;
+      ttsAudio.ontimeupdate = () => {
+        const ms = ttsAudio.currentTime * 1000;
+        while (wIdx < words.length && ms >= words[wIdx].s) { highlightWordByText(words[wIdx].w); wIdx++; }
+      };
+      ttsAudio.onended = () => {
+        unwrapWords();
+        if (!ttsActive || gen !== _ttsGen) return;
+        if (current < TOTAL-1) next(); else ttsStop();
+      };
+      ttsAudio.onerror = () => { unwrapWords(); if (ttsActive) ttsStop(); };
+      try { await ttsAudio.play(); } catch { throw new Error('play_blocked'); }
 
-    utt.onend = () => {
-      if (!ttsActive) return;
-      unwrapWords();
-      if (current < TOTAL-1) { next(); }
-      else                   { ttsStop(); }
-    };
-    utt.onerror = e => {
-      unwrapWords();
-      if (e.error !== 'interrupted') ttsStop();
-    };
+    } catch {
+      // ── Fallback: Web Speech API ──────────────────────────────
+      if (gen !== _ttsGen || !ttsActive) return;
+      _usingEdge = false;
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang=lang; utt.rate=ttsRate;
+      const voice=pickVoice(lang); if (voice) utt.voice=voice;
 
-    synth.cancel();
-    synth.speak(utt);
+      // Chrome bug: onend sometimes never fires — advance after estimated duration
+      const estMs = Math.ceil(text.length * 14 / ttsRate) + 4000;
+      let _fbTimer = setTimeout(() => {
+        if (!ttsActive || synth.speaking || gen !== _ttsGen) return;
+        unwrapWords(); if (current<TOTAL-1) next(); else ttsStop();
+      }, estMs);
+
+      utt.onboundary = e => { if (e.name==='word') highlightWord(e.charIndex); };
+      utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
+      utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted') ttsStop(); };
+      synth.cancel(); synth.speak(utt);
+    }
+
     updateTtsBtn();
   }
 
   function ttsToggle() {
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
-      $('tts-bar').classList.add('visible');
-      $('btn-tts').classList.add('active');
+      $('tts-bar').classList.add('visible'); $('btn-tts').classList.add('active');
       ttsSpeak();
-    } else if (synth.paused) {
-      synth.resume(); ttsPaused=false; updateTtsBtn();
+    } else if (ttsPaused) {
+      if (_usingEdge) ttsAudio.play(); else synth.resume();
+      ttsPaused=false; updateTtsBtn();
     } else {
-      synth.pause(); ttsPaused=true; updateTtsBtn();
+      if (_usingEdge) ttsAudio.pause(); else synth.pause();
+      ttsPaused=true; updateTtsBtn();
     }
   }
 
   function ttsStop() {
-    synth.cancel();
-    unwrapWords();
-    ttsActive=false; ttsPaused=false;
-    $('tts-bar').classList.remove('visible');
-    $('btn-tts').classList.remove('active');
-    $('btn-tts').textContent='🔊';
-    $('tts-play').textContent='▶';
+    cancelCurrent(); unwrapWords();
+    ttsActive=false; ttsPaused=false; _usingEdge=false;
+    $('tts-bar').classList.remove('visible'); $('btn-tts').classList.remove('active');
+    $('btn-tts').textContent='🔊'; $('tts-play').textContent='▶';
   }
 
   function updateTtsBtn() {
@@ -827,30 +828,19 @@
     $('tts-play').textContent = playing ? '⏸' : '▶';
   }
 
-  // Pre-select detected book language in TTS language picker
-  const detectedBcp47 = BOOK_BCP47 !== 'unknown'
-    ? BOOK_BCP47
-    : (ISO_TO_BCP47[navigator.language.split('-')[0]] || 'pt-BR');
+  const detectedBcp47 = BOOK_BCP47!=='unknown' ? BOOK_BCP47 : (ISO_TO_BCP47[navigator.language.split('-')[0]]||'pt-BR');
   $('tts-lang-sel').value = detectedBcp47;
-  // If detected value isn't in the option list, fall back to pt-BR
   if (!$('tts-lang-sel').value) $('tts-lang-sel').value = 'pt-BR';
 
   $('btn-tts').addEventListener('click', ttsToggle);
   $('tts-play').addEventListener('click', ttsToggle);
   $('tts-stop').addEventListener('click', ttsStop);
-  $('tts-prev').addEventListener('click', ()=>{ synth.cancel(); prev(); });
-  $('tts-next').addEventListener('click', ()=>{ synth.cancel(); next(); });
-
+  $('tts-prev').addEventListener('click', () => { cancelCurrent(); prev(); });
+  $('tts-next').addEventListener('click', () => { cancelCurrent(); next(); });
   $('tts-speed').addEventListener('change', e => {
     ttsRate=parseFloat(e.target.value);
-    if (ttsActive && !ttsPaused) {
-      // Restart utterance with new rate
-      synth.cancel();
-      setTimeout(ttsSpeak, 60);
-    }
+    if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   });
-
-  // onvoiceschanged already wired above in the voice-cache section
 
   // ════════════════════════════════════════════════════════════════
   // TRANSLATION — inline (replaces card text in place)
@@ -893,14 +883,14 @@
       .map(l => `<p>${l}</p>`).join('');
     translatedNow = true;
     $('btn-xlat').classList.add('active');
-    if (ttsActive) { synth.cancel(); setTimeout(ttsSpeak, 60); }
+    if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
 
   function revertTranslation() {
     renderCard(front, CARDS[current]);   // re-render from source data
     translatedNow = false;
     $('btn-xlat').classList.remove('active');
-    if (ttsActive) { synth.cancel(); setTimeout(ttsSpeak, 60); }
+    if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
 
   async function translateCard(idx) {

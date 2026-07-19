@@ -17,6 +17,7 @@ env/
 # App data (livros enviados pelos usuários — não pertencem ao repo)
 books/
 uploads/
+tts_cache/
 
 # OS
 .DS_Store
