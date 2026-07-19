@@ -274,6 +274,16 @@ def reader(book_id):
     return render_template('reader.html', book=book)
 
 
+def _prune_tts_cache(max_mb=80):
+    mp3s = sorted(TTS_CACHE.glob('*.mp3'), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in mp3s)
+    while total > max_mb * 1024 * 1024 and mp3s:
+        oldest = mp3s.pop(0)
+        total -= oldest.stat().st_size
+        oldest.unlink(missing_ok=True)
+        oldest.with_suffix('.json').unlink(missing_ok=True)
+
+
 @app.route('/api/tts', methods=['POST'])
 def api_tts():
     data  = request.get_json(silent=True) or {}
@@ -332,6 +342,7 @@ def api_tts():
         if not generated:
             abort(503)
 
+        _prune_tts_cache()
         json_path.write_text(json.dumps(words, ensure_ascii=False))
 
     words = json.loads(json_path.read_text()) if json_path.exists() else []
