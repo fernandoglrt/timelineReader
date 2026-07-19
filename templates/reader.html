@@ -1158,7 +1158,9 @@
   // TRANSLATION — inline (replaces card text in place)
   // Primary: Google Translate unofficial · Fallback: MyMemory
   // ════════════════════════════════════════════════════════════════
-  const cache = {};        // { "cardIdx_lang": translatedText }
+  const CACHE_KEY = 'xlat_' + BOOK_ID;
+  const cache = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); } catch { return {}; } })();
+  const _saveCache = () => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch {} };
   let translatedNow = false, _translatedLang = null, autoTranslate = false;
 
   // Pre-select the opposite of book language
@@ -1233,7 +1235,7 @@
     if (!text) return;
     try {
       const from = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
-      cache[cacheKey] = await fetchTranslation(text, from, to);
+      cache[cacheKey] = await fetchTranslation(text, from, to); _saveCache();
     } catch {}  // silencioso — é prefetch
   }
 
@@ -1258,7 +1260,7 @@
     try {
       const from   = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
       const result = await fetchTranslation(text, from, to);
-      cache[cacheKey] = result;
+      cache[cacheKey] = result; _saveCache();
       if (current !== idx) return false;  // página mudou enquanto traduzia — descarta
       applyTranslation(result, to);
       return true;
