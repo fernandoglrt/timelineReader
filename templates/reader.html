@@ -998,8 +998,8 @@
   function applyTranslation(text, toIso) {
     const inner = front.querySelector('.card-inner');
     if (!inner) return;
-    inner.innerHTML = text.split(/\n+/).filter(l => l.trim())
-      .map(l => `<p>${l}</p>`).join('');
+    inner.innerHTML = text.split(/\n{2,}/).filter(l => l.trim())
+      .map(l => `<p>${l.replace(/\n/g, ' ')}</p>`).join('');
     translatedNow = true;
     autoTranslate = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
