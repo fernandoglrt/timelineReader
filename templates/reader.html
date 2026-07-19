@@ -766,7 +766,25 @@
         if (!ttsActive || gen !== _ttsGen) return;
         if (current < TOTAL-1) next(); else ttsStop();
       };
-      ttsAudio.onerror = () => { unwrapWords(); if (ttsActive) ttsStop(); };
+      ttsAudio.onerror = () => {
+        if (gen !== _ttsGen || !ttsActive) return;
+        unwrapWords();
+        // MP3 failed — fall through to Web Speech API
+        _usingEdge = false;
+        const utt2 = new SpeechSynthesisUtterance(text);
+        utt2.lang = lang; utt2.rate = ttsRate;
+        const v2 = pickVoice(lang); if (v2) utt2.voice = v2;
+        const estMs2 = Math.ceil(text.length * 14 / ttsRate) + 4000;
+        let fbTimer2 = setTimeout(() => {
+          if (!ttsActive || synth.speaking || gen !== _ttsGen) return;
+          unwrapWords(); if (current < TOTAL-1) next(); else ttsStop();
+        }, estMs2);
+        utt2.onboundary = e => { if (e.name === 'word') highlightWord(e.charIndex); };
+        utt2.onend = () => { clearTimeout(fbTimer2); if (!ttsActive || gen !== _ttsGen) return; unwrapWords(); if (current < TOTAL-1) next(); else ttsStop(); };
+        utt2.onerror = e => { clearTimeout(fbTimer2); unwrapWords(); if (e.error !== 'interrupted') ttsStop(); };
+        synth.cancel(); synth.speak(utt2);
+        updateTtsBtn();
+      };
       try { await ttsAudio.play(); } catch { throw new Error('play_blocked'); }
 
     } catch {

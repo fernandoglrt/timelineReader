@@ -320,9 +320,15 @@ def api_tts():
                 mp3_path.write_bytes(b''.join(chunks))
 
             asyncio.run(_edge_gen())
-            generated = True
+            # Only accept if the file has real audio content (>100 bytes)
+            if mp3_path.exists() and mp3_path.stat().st_size > 100:
+                generated = True
+            else:
+                mp3_path.unlink(missing_ok=True)
+                words = []
         except Exception:
-            pass
+            mp3_path.unlink(missing_ok=True)
+            words = []
 
         # ── 2. gTTS fallback (Google TTS, leve, sem timestamps precisos) ─
         if not generated:
@@ -356,7 +362,10 @@ def api_tts_audio(key):
     path = TTS_CACHE / f"{key}.mp3"
     if not path.exists():
         abort(404)
-    return send_file(path, mimetype='audio/mpeg')
+    try:
+        return send_file(path, mimetype='audio/mpeg')
+    except FileNotFoundError:
+        abort(404)
 
 
 if __name__ == '__main__':
