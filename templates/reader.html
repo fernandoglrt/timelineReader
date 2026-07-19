@@ -973,7 +973,13 @@
       return;
     }
 
-    const text = cardText(idx);
+    // Extrair parágrafos separados para preservar quebras de linha na tradução
+    const _tmp = document.createElement('div');
+    _tmp.innerHTML = CARDS[idx].html || '';
+    const _blocks = Array.from(_tmp.querySelectorAll('p,li,blockquote,h1,h2,h3,h4,h5,h6'));
+    const text = _blocks.length > 1
+      ? _blocks.map(b => b.textContent.trim()).filter(t => t).join('\n\n')
+      : _tmp.textContent.trim();
     if (!text) return;
 
     const cacheKey = `${idx}_${to}`;
