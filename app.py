@@ -224,6 +224,18 @@ def upload():
     return redirect(url_for('reader', book_id=book_id))
 
 
+@app.route('/delete/<book_id>', methods=['POST'])
+def delete_book(book_id):
+    try:
+        uuid.UUID(book_id)
+    except ValueError:
+        abort(404)
+    book_path = app.config['BOOKS_FOLDER'] / f'{book_id}.json'
+    if book_path.exists():
+        book_path.unlink()
+    return ('', 204)   # No Content — caller handles UI update via JS
+
+
 @app.route('/reader/<book_id>')
 def reader(book_id):
     try:

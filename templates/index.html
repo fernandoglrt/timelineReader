@@ -159,21 +159,37 @@
       margin-bottom: 12px;
     }
     .recent-list { list-style: none; }
+    .recent-list li {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
     .recent-item {
+      flex: 1;
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 12px 16px;
       background: var(--bg2);
       border-radius: 12px;
-      margin-bottom: 8px;
       text-decoration: none;
       color: var(--text);
       border: 1px solid var(--border);
       transition: border-color 0.15s;
+      min-width: 0;
     }
     .recent-item:hover { border-color: var(--accent); }
-    .recent-item-info { flex: 1; min-width: 0; }
+    .recent-item-info { flex: 1; min-width: 0; padding-right: 8px; }
+    .btn-del {
+      flex-shrink: 0;
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: .9rem;
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+      margin-left: 4px;
+    }
+    .btn-del:hover { background: rgba(192,57,43,.12); color: #c0392b; }
     .recent-item-title {
       font-family: 'Lora', Georgia, serif;
       font-size: 0.95rem;
@@ -322,10 +338,11 @@
       section.style.display = 'block';
 
       recent.slice(0, 5).forEach(book => {
-        const pos = getCookie(`pos_${book.id}`);
-        const pct = pos ? parseFloat(pos) : 0;
+        const pos = getCookie(`card_${book.id}`);
+        const pct = pos !== null ? Math.min(100, (parseInt(pos) / Math.max(1, parseInt(pos)+1)) * 100) : 0;
 
         const li = document.createElement('li');
+        li.dataset.id = book.id;
         li.innerHTML = `
           <a class="recent-item" href="/reader/${book.id}">
             <div class="recent-item-info">
@@ -333,10 +350,21 @@
               <div class="progress-mini">
                 <div class="progress-mini-fill" style="width:${pct}%"></div>
               </div>
-              <div class="recent-item-progress">${Math.round(pct)}% lido</div>
+              <div class="recent-item-progress">${pos !== null ? `Card ${parseInt(pos)+1}` : 'Não iniciado'}</div>
             </div>
             <span class="recent-item-arrow">→</span>
-          </a>`;
+          </a>
+          <button class="btn-del" title="Apagar livro" aria-label="Apagar">✕</button>`;
+
+        li.querySelector('.btn-del').addEventListener('click', async () => {
+          try { await fetch(`/delete/${book.id}`, { method: 'POST' }); } catch {}
+          let r = JSON.parse(localStorage.getItem('recentBooks') || '[]');
+          r = r.filter(b => b.id !== book.id);
+          localStorage.setItem('recentBooks', JSON.stringify(r));
+          li.remove();
+          if (!list.children.length) document.getElementById('recent-section').style.display = 'none';
+        });
+
         list.appendChild(li);
       });
     }

@@ -434,13 +434,15 @@
 <script>
 (function () {
   // ── Data ────────────────────────────────────────────────────────
-  const SECTIONS    = {{ book.sections | tojson }};
-  const BOOK_ID     = {{ book.id | tojson }};
-  const BOOK_TITLE  = {{ book.title | tojson }};
-  const BOOK_LANG   = {{ (book.lang.iso if book.lang else 'unknown') | tojson }};
-  const BOOK_BCP47  = {{ (book.lang.bcp47 if book.lang else 'unknown') | tojson }};
-  const COOKIE_KEY  = 'card_' + BOOK_ID;
-  const YEAR_MS     = 365 * 24 * 60 * 60 * 1000;
+  const SECTIONS       = {{ book.sections | tojson }};
+  const BOOK_ID        = {{ book.id | tojson }};
+  const BOOK_TITLE     = {{ book.title | tojson }};
+  const BOOK_LANG      = {{ (book.lang.iso if book.lang else 'unknown') | tojson }};
+  const BOOK_BCP47     = {{ (book.lang.bcp47 if book.lang else 'unknown') | tojson }};
+  const BOOK_FORMAT    = {{ book.format | tojson }};
+  const TOTAL_SECTIONS = {{ book.sections | length }};
+  const COOKIE_KEY     = 'card_' + BOOK_ID;
+  const YEAR_MS        = 365 * 24 * 60 * 60 * 1000;
 
   const LANG_NAMES  = {
     pt:'Português', en:'Inglês', es:'Espanhol', fr:'Francês', de:'Alemão',
@@ -498,8 +500,11 @@
     const cards = [];
     let chapterTitle = '', chapterCount = 0;
 
-    for (const section of SECTIONS) {
+    for (let sIdx = 0; sIdx < SECTIONS.length; sIdx++) {
+      const section = SECTIONS[sIdx];
       if (!section.html) continue;
+      const mark = cards.length;   // first card index for this section
+
       const doc  = new DOMParser().parseFromString(section.html, 'text/html');
       const body = doc.body;
       const SELS = 'p,h1,h2,h3,h4,h5,h6,blockquote,hr,ul,ol,figure';
@@ -516,48 +521,50 @@
         if (!text) continue;
         for (const chunk of splitBySentence(text, 580))
           cards.push({ type:'text', html:`<p>${chunk}</p>`, chapter:chapterTitle });
-        continue;
+      } else {
+        let buf=[], bufLen=0;
+        const LIMIT=580, DIAL=110;
+        const flush = () => {
+          if (buf.length) cards.push({ type:'text', html:buf.join(''), chapter:chapterTitle });
+          buf=[]; bufLen=0;
+        };
+
+        for (const node of nodes) {
+          const tag=node.tagName, text=node.textContent.trim();
+          if (!text && tag!=='HR') continue;
+
+          if (tag==='HR') { flush(); cards.push({type:'divider',chapter:chapterTitle}); continue; }
+
+          if (tag==='H1'||tag==='H2') {
+            flush(); chapterTitle=text; chapterCount++;
+            cards.push({type:'chapter',html:node.outerHTML,chapter:text,num:chapterCount}); continue;
+          }
+          if (tag==='H3'||tag==='H4') {
+            flush(); cards.push({type:'heading',html:node.outerHTML,chapter:chapterTitle}); continue;
+          }
+          if (tag==='H5'||tag==='H6') {
+            if (bufLen+text.length>LIMIT && buf.length) flush();
+            buf.push(node.outerHTML); bufLen+=text.length; continue;
+          }
+          if (text.length>700) {
+            flush();
+            for (const chunk of splitBySentence(text, 560))
+              cards.push({type:'text',html:`<p>${chunk}</p>`,chapter:chapterTitle});
+            continue;
+          }
+          if (text.length<=DIAL) {
+            if (bufLen+text.length>LIMIT && buf.length) flush();
+            buf.push(node.outerHTML); bufLen+=text.length; continue;
+          }
+          if (bufLen+text.length>LIMIT && buf.length) flush();
+          buf.push(node.outerHTML); bufLen+=text.length;
+          if (bufLen>=LIMIT) flush();
+        }
+        flush();
       }
 
-      let buf=[], bufLen=0;
-      const LIMIT=580, DIAL=110;
-      const flush = () => {
-        if (buf.length) cards.push({ type:'text', html:buf.join(''), chapter:chapterTitle });
-        buf=[]; bufLen=0;
-      };
-
-      for (const node of nodes) {
-        const tag=node.tagName, text=node.textContent.trim();
-        if (!text && tag!=='HR') continue;
-
-        if (tag==='HR') { flush(); cards.push({type:'divider',chapter:chapterTitle}); continue; }
-
-        if (tag==='H1'||tag==='H2') {
-          flush(); chapterTitle=text; chapterCount++;
-          cards.push({type:'chapter',html:node.outerHTML,chapter:text,num:chapterCount}); continue;
-        }
-        if (tag==='H3'||tag==='H4') {
-          flush(); cards.push({type:'heading',html:node.outerHTML,chapter:chapterTitle}); continue;
-        }
-        if (tag==='H5'||tag==='H6') {
-          if (bufLen+text.length>LIMIT && buf.length) flush();
-          buf.push(node.outerHTML); bufLen+=text.length; continue;
-        }
-        if (text.length>700) {
-          flush();
-          for (const chunk of splitBySentence(text, 560))
-            cards.push({type:'text',html:`<p>${chunk}</p>`,chapter:chapterTitle});
-          continue;
-        }
-        if (text.length<=DIAL) {
-          if (bufLen+text.length>LIMIT && buf.length) flush();
-          buf.push(node.outerHTML); bufLen+=text.length; continue;
-        }
-        if (bufLen+text.length>LIMIT && buf.length) flush();
-        buf.push(node.outerHTML); bufLen+=text.length;
-        if (bufLen>=LIMIT) flush();
-      }
-      flush();
+      // Tag every card from this section with its 1-based source index (= PDF page number)
+      for (let i = mark; i < cards.length; i++) cards[i].sectionIdx = sIdx + 1;
     }
     return cards;
   }
@@ -598,9 +605,15 @@
     const card = CARDS[idx];
     const pct  = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
     $('progress-fill').style.width = pct+'%';
-    $('tb-counter').textContent    = `${idx+1} / ${TOTAL}`;
-    $('tb-chapter').textContent    = card.chapter||'';
-    $('tb-book').textContent       = BOOK_TITLE;
+
+    if (BOOK_FORMAT === 'pdf' && card.sectionIdx) {
+      $('tb-counter').textContent = `Pág. ${card.sectionIdx} / ${TOTAL_SECTIONS}`;
+    } else {
+      $('tb-counter').textContent = `${idx+1} / ${TOTAL}`;
+    }
+
+    $('tb-chapter').textContent = card.chapter||'';
+    $('tb-book').textContent    = BOOK_TITLE;
   }
 
   // ── Navigation ────────────────────────────────────────────────────
@@ -909,6 +922,7 @@
   $('target-lang').value = defaultTarget;
 
   // "Detectado: Inglês" label
+  const langName = LANG_NAMES[BOOK_LANG] || (BOOK_LANG !== 'unknown' ? BOOK_LANG.toUpperCase() : '');
   $('drawer-from').textContent = langName || 'Detectado';
 
   async function fetchTranslation(text, from, to) {
@@ -940,24 +954,32 @@
   }
 
   async function translateCard(idx, scrollTop=true) {
-    const to      = $('target-lang').value;
-    const cacheKey= `${idx}_${to}`;
-    const text    = cardText(idx);
+    const to       = $('target-lang').value;
+    const cacheKey = `${idx}_${to}`;
+    const text     = cardText(idx);
     if (!text) { showDrawerContent('<em>Sem texto para traduzir neste card.</em>'); return; }
 
-    if (cache[cacheKey]) { showDrawerContent(cache[cacheKey]); return; }
+    // Same-language guard: skip translation if source ≈ target
+    const fromBase = BOOK_LANG !== 'unknown' ? BOOK_LANG.split('-')[0] : null;
+    const toBase   = to.split('-')[0];
+    if (fromBase && fromBase === toBase) {
+      showDrawerContent(`<em style="color:var(--muted)">O livro já está em ${LANG_NAMES[fromBase] || fromBase}. Escolha outro idioma.</em>`);
+      return;
+    }
+
+    if (cache[cacheKey]) { showDrawerContent(cache[cacheKey]); if (scrollTop) $('drawer-body').scrollTop=0; return; }
 
     showDrawerContent('<div class="translation-status"><div class="spinner-sm"></div>Traduzindo…</div>');
 
     try {
-      const from = BOOK_LANG==='unknown' ? 'auto' : BOOK_LANG;
+      const from = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
       showDrawerContent(result);
       // If TTS is running while drawer just got the translation, switch to reading it
       if (ttsActive) { synth.cancel(); setTimeout(ttsSpeak, 60); }
     } catch(e) {
-      showDrawerContent(`<em style="color:var(--muted)">${e.message}</em>`);
+      showDrawerContent(`<em style="color:var(--muted)">${e.message}</em> <button onclick="translateCard(${idx})" style="font-family:Inter,sans-serif;font-size:.75rem;cursor:pointer;border:1px solid var(--border);background:var(--bg3);border-radius:6px;padding:3px 8px;color:var(--text);margin-left:8px">Tentar novamente</button>`);
     }
     if (scrollTop) $('drawer-body').scrollTop=0;
   }
