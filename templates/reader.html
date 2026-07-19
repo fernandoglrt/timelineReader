@@ -545,21 +545,25 @@
 
   function updateUI(idx) {
     const card    = CARDS[idx];
-    const pct     = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
     const counter = $('tb-counter');
-    $('progress-fill').style.width = pct+'%';
+    let pct;
 
     if (BOOK_FORMAT === 'pdf' && card.sectionIdx) {
+      pct = TOTAL_SECTIONS > 1 ? ((card.sectionIdx - 1) / (TOTAL_SECTIONS - 1)) * 100 : 100;
       counter.className   = 'tb-counter';
       counter.textContent = `Pág. ${card.sectionIdx} / ${TOTAL_SECTIONS}`;
     } else if (BOOK_FORMAT === 'epub' && card.sectionIdx) {
       const estPage = Math.max(1, Math.ceil((card.charOffset + card.charLen / 2) / PAGE_SIZE));
+      pct = TOTAL_PAGES_EST > 1 ? ((estPage - 1) / (TOTAL_PAGES_EST - 1)) * 100 : 100;
       counter.className = 'tb-counter two-line';
       counter.innerHTML  = `Seç. ${card.sectionIdx} / ${TOTAL_SECTIONS}<br>~Pág. ${estPage} / ${TOTAL_PAGES_EST}`;
     } else {
+      pct = TOTAL > 1 ? (idx / (TOTAL - 1)) * 100 : 100;
       counter.className   = 'tb-counter';
       counter.textContent = `${idx+1} / ${TOTAL}`;
     }
+
+    $('progress-fill').style.width = pct + '%';
 
     $('tb-chapter').textContent = card.chapter||'';
     $('tb-book').textContent    = BOOK_TITLE;
