@@ -795,29 +795,33 @@
     // ── Try server TTS via Web Audio API ────────────────────────────
     let serverOk = false;
     try {
-      dbg('fetch /api/tts…');
+      dbg(`1/5 POST /api/tts lang=${lang.split('-')[0]}`);
       const resp = await fetch('/api/tts', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ text, lang: lang.split('-')[0], rate: ttsRate }),
         signal: AbortSignal.timeout(20000),
       });
       if (gen !== _ttsGen || !ttsActive) return;
-      if (!resp.ok) throw new Error(`srv ${resp.status}`);
-      const { audio, words } = await resp.json();
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+      const { audio, words, engine } = await resp.json();
       if (gen !== _ttsGen || !ttsActive) return;
+      dbg(`2/5 engine=${engine||'?'} words=${words.length}`);
 
-      dbg('baixando mp3…');
       const audioResp = await fetch(audio);
       if (gen !== _ttsGen || !ttsActive) return;
+      if (!audioResp.ok) throw new Error(`audio HTTP ${audioResp.status}`);
+      const ct = audioResp.headers.get('content-type')||'?';
+      dbg(`3/5 audio ok type=${ct}`);
       const arrayBuf = await audioResp.arrayBuffer();
       if (gen !== _ttsGen || !ttsActive) return;
 
-      dbg(`mp3 ${arrayBuf.byteLength}b ctx:${_audioCtx?_audioCtx.state:'null'}`);
+      dbg(`4/5 buf=${arrayBuf.byteLength}b ctx=${_audioCtx?_audioCtx.state:'null'}`);
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
 
       const audioBuf = await _audioCtx.decodeAudioData(arrayBuf);
       if (gen !== _ttsGen || !ttsActive) return;
+      dbg(`5/5 decoded ${audioBuf.duration.toFixed(1)}s`);
 
       serverOk = true;
       _usingEdge = true;
@@ -846,11 +850,11 @@
       _audioSrc.onended = _advancePage;
       // iOS fallback: onended sometimes doesn't fire — advance after expected duration
       setTimeout(_advancePage, Math.ceil(audioBuf.duration * 1000) + 700);
-      dbg('▶ Web Audio');
+      dbg(`▶ Web Audio [${engine||'?'}]`);
       _audioSrc.start(0);
 
     } catch(err) {
-      dbg('srv erro: '+(err&&err.message||err)+' → WebSpeech');
+      dbg(`ERRO srv: ${err&&err.message||String(err)} → WebSpeech`);
     }
 
     if (!serverOk) {
@@ -860,6 +864,7 @@
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang=lang; utt.rate=ttsRate;
       const voice=pickVoice(lang); if (voice) utt.voice=voice;
+      dbg(`▶ WebSpeech voz="${voice?voice.name:'padrão'}" lang=${lang} voices=${synth.getVoices().length}`);
 
       const estMs = Math.ceil(text.length * 14 / ttsRate) + 4000;
       let _fbTimer = setTimeout(() => {

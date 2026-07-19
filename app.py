@@ -297,9 +297,11 @@ def api_tts():
     mp3_path  = TTS_CACHE / f"{key}.mp3"
     json_path = TTS_CACHE / f"{key}.json"
 
+    _engine = 'cached'
     if not mp3_path.exists():
         words     = []
         generated = False
+        _engine   = 'none'
 
         # ── 1. edge-tts (neural voices + precise word timestamps) ─────
         try:
@@ -323,12 +325,18 @@ def api_tts():
             # Only accept if the file has real audio content (>100 bytes)
             if mp3_path.exists() and mp3_path.stat().st_size > 100:
                 generated = True
+                _engine = 'edge'
             else:
                 mp3_path.unlink(missing_ok=True)
                 words = []
-        except Exception:
+        except Exception as edge_err:
+            import logging
+            logging.warning(f"[TTS] edge-tts falhou: {edge_err!r}")
             mp3_path.unlink(missing_ok=True)
             words = []
+            edge_error = str(edge_err)
+        else:
+            edge_error = None
 
         # ── 2. gTTS fallback (Google TTS, leve, sem timestamps precisos) ─
         if not generated:
@@ -336,6 +344,9 @@ def api_tts():
                 from gtts import gTTS
                 safe_lang = lang if lang != 'unknown' else 'en'
                 gTTS(text, lang=safe_lang, slow=False).save(str(mp3_path))
+                _engine = 'gtts'
+                import logging
+                logging.info(f"[TTS] gTTS ok lang={safe_lang} edge_err={edge_error!r}")
                 # Estima timings a ~140 wpm
                 raw_words = re.findall(r'\S+', text)
                 ms_each   = max(1, int(60000 / (140 * rate)))
@@ -352,7 +363,7 @@ def api_tts():
         json_path.write_text(json.dumps(words, ensure_ascii=False))
 
     words = json.loads(json_path.read_text()) if json_path.exists() else []
-    return jsonify({'audio': f'/api/tts/audio/{key}', 'words': words})
+    return jsonify({'audio': f'/api/tts/audio/{key}', 'words': words, 'engine': _engine})
 
 
 @app.route('/api/tts/audio/<key>')
