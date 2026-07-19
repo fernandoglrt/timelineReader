@@ -760,7 +760,9 @@
       if (gen !== _ttsGen || !ttsActive) return;
 
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (_audioCtx.state === 'suspended') await _audioCtx.resume();
+      // Don't await resume here — we're outside user-gesture on iOS and it won't work.
+      // Context is already unlocked by the silent-buffer in ttsToggle().
+      if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
       const audioBuf = await _audioCtx.decodeAudioData(arrayBuf);
       if (gen !== _ttsGen || !ttsActive) return;
 
@@ -814,11 +816,16 @@
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
       $('btn-tts').classList.add('active');
-      // Unlock AudioContext on iOS/Android in the user-gesture thread.
-      // After resume(), decodeAudioData + start() work freely even after await.
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      _audioCtx.resume().catch(() => {});
-      ttsSpeak();
+      // iOS Safari requires an actual audio buffer played synchronously within the
+      // user-gesture handler to unlock the AudioContext (resume() alone isn't enough).
+      try {
+        const silBuf = _audioCtx.createBuffer(1, 1, 22050);
+        const silSrc = _audioCtx.createBufferSource();
+        silSrc.buffer = silBuf; silSrc.connect(_audioCtx.destination); silSrc.start(0);
+      } catch {}
+      // Chain ttsSpeak() after resume resolves — don't fire in parallel.
+      _audioCtx.resume().then(() => ttsSpeak()).catch(() => ttsSpeak());
     } else if (ttsPaused) {
       if (_usingEdge) { _audioCtx && _audioCtx.resume().catch(() => {}); } else synth.resume();
       ttsPaused=false; updateTtsBtn();
