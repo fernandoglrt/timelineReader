@@ -3,7 +3,6 @@ import uuid
 import json
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, abort
-from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = Path('uploads')
@@ -16,6 +15,34 @@ ALLOWED_EXTENSIONS = {'.epub', '.pdf'}
 for folder in (app.config['UPLOAD_FOLDER'], app.config['BOOKS_FOLDER']):
     folder.mkdir(exist_ok=True)
 
+# BCP-47 tags for Web Speech API, keyed by ISO 639-1 code
+LANG_BCP47 = {
+    'pt': 'pt-BR', 'en': 'en-US', 'es': 'es-ES', 'fr': 'fr-FR',
+    'de': 'de-DE', 'it': 'it-IT', 'ja': 'ja-JP', 'zh': 'zh-CN',
+    'ru': 'ru-RU', 'ar': 'ar-SA', 'ko': 'ko-KR', 'nl': 'nl-NL',
+    'pl': 'pl-PL', 'tr': 'tr-TR', 'sv': 'sv-SE', 'da': 'da-DK',
+    'fi': 'fi-FI', 'nb': 'nb-NO', 'cs': 'cs-CZ', 'ro': 'ro-RO',
+}
+
+try:
+    from langdetect import detect as _langdetect
+    def detect_lang(text: str) -> str:
+        try:
+            return _langdetect(text[:600]) or 'unknown'
+        except Exception:
+            return 'unknown'
+except ImportError:
+    def detect_lang(text: str) -> str:
+        return 'unknown'
+
+
+def resolve_lang(code: str) -> dict:
+    """Normalise a raw lang tag to ISO 639-1 + BCP-47."""
+    if not code:
+        return {'iso': 'unknown', 'bcp47': 'unknown'}
+    iso = code.split('-')[0].lower()[:2]
+    return {'iso': iso, 'bcp47': LANG_BCP47.get(iso, iso)}
+
 
 def parse_epub(filepath: Path) -> dict:
     import ebooklib
@@ -24,11 +51,15 @@ def parse_epub(filepath: Path) -> dict:
 
     book = epub.read_epub(str(filepath))
 
-    meta_title = book.get_metadata('DC', 'title')
-    title = meta_title[0][0] if meta_title else filepath.stem
+    meta_title  = book.get_metadata('DC', 'title')
+    title       = meta_title[0][0] if meta_title else filepath.stem
 
     meta_author = book.get_metadata('DC', 'creator')
-    author = meta_author[0][0] if meta_author else ''
+    author      = meta_author[0][0] if meta_author else ''
+
+    # Language from metadata (most reliable source)
+    meta_lang = book.get_metadata('DC', 'language')
+    raw_lang  = meta_lang[0][0] if meta_lang else ''
 
     KEEP_TAGS = {
         'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -43,11 +74,12 @@ def parse_epub(filepath: Path) -> dict:
         item = book.get_item_with_id(sid)
         if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
             ordered_items.append(item)
-
     if not ordered_items:
         ordered_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
-    sections = []
+    sections   = []
+    text_sample = ''
+
     for item in ordered_items:
         try:
             raw = item.get_content().decode('utf-8', errors='replace')
@@ -55,18 +87,14 @@ def parse_epub(filepath: Path) -> dict:
             continue
 
         soup = BeautifulSoup(raw, 'lxml')
-
         for tag in soup(['script', 'style', 'meta', 'link', 'head']):
             tag.decompose()
 
         body = soup.find('body') or soup
 
-        # Strip disallowed tags but keep their text content
         for tag in body.find_all(True):
             if tag.name not in KEEP_TAGS:
                 tag.unwrap()
-
-        # Remove all attributes for security
         for tag in body.find_all(True):
             tag.attrs = {}
 
@@ -75,18 +103,28 @@ def parse_epub(filepath: Path) -> dict:
 
         if len(text) > 80:
             sections.append({'html': html})
+            if len(text_sample) < 600:
+                text_sample += ' ' + text
 
-    return {'title': title, 'author': author, 'sections': sections, 'format': 'epub'}
+    # Detect language from text if metadata was absent
+    if not raw_lang and text_sample.strip():
+        raw_lang = detect_lang(text_sample.strip())
+
+    lang = resolve_lang(raw_lang)
+    return {'title': title, 'author': author, 'sections': sections,
+            'format': 'epub', 'lang': lang}
 
 
 def parse_pdf(filepath: Path) -> dict:
     import fitz
 
-    doc = fitz.open(str(filepath))
-    title = doc.metadata.get('title', '').strip() or filepath.stem
-    author = doc.metadata.get('author', '').strip()
+    doc    = fitz.open(str(filepath))
+    title  = doc.metadata.get('title',    '').strip() or filepath.stem
+    author = doc.metadata.get('author',   '').strip()
+    raw_lang = doc.metadata.get('language', '').strip()
 
-    sections = []
+    sections    = []
+    text_sample = ''
 
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -99,25 +137,20 @@ def parse_pdf(filepath: Path) -> dict:
         for block in data.get("blocks", []):
             if block.get("type") != 0:
                 continue
-
             lines = block.get("lines", [])
             if not lines:
                 continue
-
             all_spans = [s for line in lines for s in line.get("spans", [])]
             if not all_spans:
                 continue
 
             avg_size = sum(s.get("size", 12) for s in all_spans) / len(all_spans)
-            is_bold = any("Bold" in s.get("font", "") for s in all_spans)
-
-            line_texts = []
-            for line in lines:
-                lt = " ".join(s.get("text", "") for s in line.get("spans", [])).strip()
-                if lt:
-                    line_texts.append(lt)
-
-            text = " ".join(line_texts).strip()
+            is_bold  = any("Bold" in s.get("font", "") for s in all_spans)
+            line_texts = [
+                " ".join(s.get("text", "") for s in ln.get("spans", [])).strip()
+                for ln in lines
+            ]
+            text = " ".join(t for t in line_texts if t).strip()
             if not text:
                 continue
 
@@ -128,10 +161,19 @@ def parse_pdf(filepath: Path) -> dict:
                 html_parts.append(f"<p>{text}</p>")
 
         if html_parts:
-            sections.append({'html': "\n".join(html_parts)})
+            raw_text = "\n".join(html_parts)
+            sections.append({'html': raw_text})
+            if len(text_sample) < 600:
+                text_sample += ' ' + " ".join(line_texts)
 
     doc.close()
-    return {'title': title, 'author': author, 'sections': sections, 'format': 'pdf'}
+
+    if not raw_lang and text_sample.strip():
+        raw_lang = detect_lang(text_sample.strip())
+
+    lang = resolve_lang(raw_lang)
+    return {'title': title, 'author': author, 'sections': sections,
+            'format': 'pdf', 'lang': lang}
 
 
 @app.route('/')
@@ -152,7 +194,7 @@ def upload():
     if ext not in ALLOWED_EXTENSIONS:
         return render_template('index.html', error="Formato inválido. Envie um arquivo .epub ou .pdf.")
 
-    book_id = str(uuid.uuid4())
+    book_id  = str(uuid.uuid4())
     tmp_path = app.config['UPLOAD_FOLDER'] / f'{book_id}{ext}'
 
     try:
@@ -166,7 +208,7 @@ def upload():
         if not book_data['sections']:
             return render_template('index.html', error="Não foi possível extrair conteúdo do arquivo.")
 
-        book_data['id'] = book_id
+        book_data['id']                = book_id
         book_data['original_filename'] = file.filename
 
         book_path = app.config['BOOKS_FOLDER'] / f'{book_id}.json'
