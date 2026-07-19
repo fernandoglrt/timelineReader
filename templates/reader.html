@@ -573,7 +573,7 @@
   function goTo(idx, dir) {
     if (busy||idx<0||idx>=TOTAL||idx===current) return;
     busy=true;
-    if (ttsActive) cancelCurrent();   // para áudio imediatamente, sem vazar na transição
+    if (ttsActive) { saveTTSPos(); cancelCurrent(); }  // salva posição antes de trocar de card
     setCookie(COOKIE_KEY, idx, YEAR_MS);
 
     renderCard(back, CARDS[idx]);
@@ -663,6 +663,13 @@
   let ttsActive=false, ttsPaused=false, ttsRate=1, _usingEdge=false, _ttsGen=0;
   let _audioCtx=null, _audioSrc=null;   // Web Audio API (bypasses iOS autoplay + silent mode)
 
+  // ── TTS position persistence ──────────────────────────────────────
+  const TTS_POS_KEY = 'ttsPos_' + BOOK_ID;
+  let _ttsCharPos = 0;   // char offset being lido agora (atualizado a cada palavra)
+  const saveTTSPos  = () => { if (_ttsCharPos > 20) localStorage.setItem(TTS_POS_KEY, JSON.stringify({card: current, pos: _ttsCharPos})); };
+  const clearTTSPos = () => localStorage.removeItem(TTS_POS_KEY);
+  const loadTTSPos  = () => { try { const d=JSON.parse(localStorage.getItem(TTS_POS_KEY)||'null'); return (d&&d.card===current&&d.pos>20)?d.pos:0; } catch { return 0; } };
+
   const ISO_TO_BCP47 = {
     'pt':'pt-BR','en':'en-US','es':'es-ES','fr':'fr-FR','de':'de-DE',
     'it':'it-IT','ja':'ja-JP','zh':'zh-CN','zh-cn':'zh-CN',
@@ -723,6 +730,7 @@
 
   // Web Speech: highlight by char offset
   function highlightWord(charIndex) {
+    _ttsCharPos = charIndex;
     if (activeSpan) activeSpan.classList.remove('tts-active');
     const found = wordSpans.find(sp=>sp._s<=charIndex&&sp._e>charIndex)
                || wordSpans.find(sp=>sp._s>=charIndex);
@@ -738,6 +746,7 @@
     for (let i = Math.max(0, spanSeqIdx); i < end; i++) {
       if (norm(wordSpans[i].textContent) === nw) {
         spanSeqIdx=i+1; wordSpans[i].classList.add('tts-active'); activeSpan=wordSpans[i];
+        _ttsCharPos = wordSpans[i]._s;
         wordSpans[i].scrollIntoView({behavior:'smooth',block:'nearest'}); return;
       }
     }
@@ -755,11 +764,23 @@
 
   async function ttsSpeak() {
     const gen = ++_ttsGen;
-    const { text, lang, container } = ttsContext();
+    _ttsCharPos = 0;
+    const resumePos = loadTTSPos();
+    if (resumePos > 0) clearTTSPos();   // consumido — limpa para não reusar
+
+    const { text: fullText, lang, container } = ttsContext();
+    const text = resumePos > 0 ? fullText.slice(resumePos) : fullText;
     if (!text.trim()) { if (ttsActive) next(); return; }
 
     unwrapWords();
-    if (container) wrapWords(container);
+    if (container) {
+      wrapWords(container);
+      // Posiciona karaoke no ponto de retomada
+      if (resumePos > 0) {
+        const startIdx = wordSpans.findIndex(sp => sp._s >= resumePos);
+        if (startIdx >= 0) { spanSeqIdx = startIdx; highlightWord(wordSpans[startIdx]._s); }
+      }
+    }
 
     $('tts-play').textContent='⏳'; $('btn-tts').textContent='⏳';
     $('tts-stop').classList.add('active');
@@ -813,6 +834,7 @@
       const _advancePage = () => {
         if (_pageAdvanced || !ttsActive || gen !== _ttsGen) return;
         _pageAdvanced = true;
+        clearTTSPos();   // terminou naturalmente — não retomar neste card
         unwrapWords();
         if (current < TOTAL-1) next(); else ttsStop();
       };
@@ -840,8 +862,8 @@
         unwrapWords(); if (current<TOTAL-1) next(); else ttsStop();
       }, estMs);
 
-      utt.onboundary = e => { if (e.name==='word') highlightWord(e.charIndex); };
-      utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
+      utt.onboundary = e => { if (e.name==='word') highlightWord(resumePos + e.charIndex); };
+      utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; clearTTSPos(); unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
       utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted'&&e.error!=='canceled') ttsStop(); };
       synth.cancel(); synth.speak(utt);
       dbg('▶ WebSpeech voices:'+(synth.getVoices().length));
@@ -878,6 +900,7 @@
   }
 
   function ttsStop() {
+    saveTTSPos();
     cancelCurrent(); unwrapWords();
     ttsActive=false; ttsPaused=false; _usingEdge=false;
     $('btn-tts').classList.remove('active');
