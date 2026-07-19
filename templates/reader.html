@@ -584,9 +584,9 @@
       updateUI(current);
       busy=false;
 
-      // Reset translation state for new card
       translatedNow = false; _translatedLang = null;
-      $('btn-xlat').classList.remove('active');
+      $('btn-xlat').classList.toggle('active', autoTranslate);
+      if (autoTranslate) translateCard(current);
 
       if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
     }, DUR);
@@ -788,11 +788,17 @@
         requestAnimationFrame(raf);
       })();
 
-      _audioSrc.onended = () => {
+      // _pageAdvanced guards against double-advance (onended + fallback timer)
+      let _pageAdvanced = false;
+      const _advancePage = () => {
+        if (_pageAdvanced || !ttsActive || gen !== _ttsGen) return;
+        _pageAdvanced = true;
         unwrapWords();
-        if (!ttsActive || gen !== _ttsGen) return;
         if (current < TOTAL-1) next(); else ttsStop();
       };
+      _audioSrc.onended = _advancePage;
+      // iOS fallback: onended sometimes doesn't fire — advance after expected duration
+      setTimeout(_advancePage, Math.ceil(audioBuf.duration * 1000) + 700);
       dbg('▶ Web Audio');
       _audioSrc.start(0);
 
@@ -890,7 +896,7 @@
   // Primary: Google Translate unofficial · Fallback: MyMemory
   // ════════════════════════════════════════════════════════════════
   const cache = {};        // { "cardIdx_lang": translatedText }
-  let translatedNow = false, _translatedLang = null;
+  let translatedNow = false, _translatedLang = null, autoTranslate = false;
 
   // Pre-select the opposite of book language
   $('target-lang').value = BOOK_LANG === 'pt' ? 'en' : 'pt';
@@ -924,6 +930,7 @@
     inner.innerHTML = text.split(/\n+/).filter(l => l.trim())
       .map(l => `<p>${l}</p>`).join('');
     translatedNow = true;
+    autoTranslate = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
     $('btn-xlat').classList.add('active');
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
@@ -931,7 +938,7 @@
 
   function revertTranslation() {
     renderCard(front, CARDS[current]);
-    translatedNow = false; _translatedLang = null;
+    translatedNow = false; _translatedLang = null; autoTranslate = false;
     $('btn-xlat').classList.remove('active');
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
@@ -943,7 +950,7 @@
 
     // Same-language guard
     if (fromBase && fromBase === toBase) {
-      showToast(`O livro já está em ${LANG_NAMES[fromBase] || fromBase}`);
+      if (!autoTranslate) showToast(`O livro já está em ${LANG_NAMES[fromBase] || fromBase}`);
       return;
     }
 
@@ -965,13 +972,13 @@
   }
 
   $('btn-xlat').addEventListener('click', () => {
-    if (translatedNow) revertTranslation();
+    if (autoTranslate || translatedNow) revertTranslation();
     else translateCard(current);
   });
 
-  // Re-translate with new language if already showing translation
+  // Re-translate with new language if auto-translate is active
   $('target-lang').addEventListener('change', () => {
-    if (translatedNow) { translatedNow = false; translateCard(current); }
+    if (autoTranslate || translatedNow) { translatedNow = false; translateCard(current); }
   });
 
 })();
