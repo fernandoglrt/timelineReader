@@ -1,0 +1,12 @@
+{
+  "name": "f9 reader",
+  "short_name": "f9",
+  "description": "Leia EPUB e PDF em qualquer tela",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F2E8",
+  "theme_color": "#9B6A2F",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

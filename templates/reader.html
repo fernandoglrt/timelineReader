@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>{{ book.title }}</title>
+  <title>{{ book.title }} — f9</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#F7F2E8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1C1814" media="(prefers-color-scheme: dark)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -270,6 +273,47 @@
     }
     .tl-sel:focus { outline: none; border-color: var(--accent2); color: var(--accent2); }
 
+    /* ── Popover Aa ──────────────────────────────────── */
+    .aa-pop {
+      position: fixed; top: 58px; right: 8px; z-index: 250;
+      width: 232px;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 14px; padding: 14px;
+      box-shadow: 0 12px 32px rgba(0,0,0,.18);
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .aa-pop[hidden] { display: none; }
+    .aa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .aa-label {
+      font-family: 'Inter', sans-serif; font-size: .7rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+    }
+    .aa-group { display: flex; align-items: center; gap: 6px; }
+    .aa-btn {
+      font-family: 'Inter', sans-serif; font-size: .8rem; font-weight: 600;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 6px 10px; cursor: pointer;
+      transition: background .15s;
+    }
+    .aa-btn:hover { background: var(--border); }
+    .aa-val {
+      font-family: 'Inter', sans-serif; font-size: .75rem; font-weight: 600;
+      color: var(--muted); min-width: 38px; text-align: center;
+    }
+
+    /* ── Feedback de tradução ────────────────────────── */
+    @keyframes xlatPulse { 50% { opacity: .4; } }
+    .xlat-loading { animation: xlatPulse 1.1s ease-in-out infinite; }
+    .xlat-badge {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
+      background: var(--bg2); border: 1px solid var(--accent2);
+      color: var(--accent2); border-radius: 20px; padding: 3px 12px;
+      font-family: 'Inter', sans-serif; font-size: .68rem; font-weight: 600;
+      letter-spacing: .04em; z-index: 170; pointer-events: none;
+    }
+    .xlat-badge[hidden] { display: none; }
+
     /* Karaoke word highlight */
     .tts-w { display: inline; }
     .tts-active {
@@ -292,8 +336,28 @@
   </div>
   <div class="toolbar-right">
     <div class="tb-counter" id="tb-counter"></div>
-    <button class="btn-icon" id="btn-tts"  title="Ler em voz alta">🔊</button>
-    <select class="tl-sel" id="target-lang" title="Traduzir para">
+    <button class="btn-icon" id="btn-xlat" title="Tradução automática">🌐</button>
+    <button class="btn-icon" id="btn-aa" title="Aparência e idioma">Aa</button>
+  </div>
+</nav>
+
+<!-- ── Popover Aa (fonte, tema, tradução) ──────────────── -->
+<div class="aa-pop" id="aa-pop" hidden>
+  <div class="aa-row">
+    <span class="aa-label">Fonte</span>
+    <div class="aa-group">
+      <button class="aa-btn" id="btn-fs-down" title="Fonte menor">A−</button>
+      <span class="aa-val" id="fs-val"></span>
+      <button class="aa-btn" id="btn-fs-up" title="Fonte maior">A+</button>
+    </div>
+  </div>
+  <div class="aa-row">
+    <span class="aa-label">Tema</span>
+    <button class="aa-btn" id="btn-dark"></button>
+  </div>
+  <div class="aa-row">
+    <span class="aa-label">Traduzir para</span>
+    <select class="tl-sel" id="target-lang">
       <option value="pt">PT</option>
       <option value="en">EN</option>
       <option value="es">ES</option>
@@ -304,12 +368,8 @@
       <option value="zh-CN">ZH</option>
       <option value="ru">RU</option>
     </select>
-    <button class="btn-icon" id="btn-xlat" title="Traduzir card">🌐</button>
-    <button class="btn-icon" id="btn-fs-down" title="Fonte menor">A−</button>
-    <button class="btn-icon" id="btn-fs-up"   title="Fonte maior">A+</button>
-    <button class="btn-icon" id="btn-dark">☽</button>
   </div>
-</nav>
+</div>
 
 <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
 
@@ -320,8 +380,9 @@
 </div>
 
 <!-- ── Swipe hint ──────────────────────────────────────── -->
-<div class="swipe-hint" id="swipe-hint">↑ deslize para avançar</div>
+<div class="swipe-hint" id="swipe-hint">Deslize para cima — um feed, mas de livro</div>
 <div class="toast" id="toast"></div>
+<div class="xlat-badge" id="xlat-badge" hidden></div>
 
 <!-- ── Bottom bar (navegação + TTS, sempre visível) ────── -->
 <div class="bottom-bar">
@@ -385,11 +446,25 @@
     || (localStorage.getItem('readerDark')===null && matchMedia('(prefers-color-scheme:dark)').matches);
   const applyTheme = () => {
     html.classList.toggle('dark', dark);
-    $('btn-dark').textContent = dark ? '☀' : '☽';
+    $('btn-dark').textContent = dark ? '☀ Claro' : '☽ Escuro';
     localStorage.setItem('readerDark', dark?'1':'0');
   };
   applyTheme();
   $('btn-dark').addEventListener('click', () => { dark=!dark; applyTheme(); });
+
+  // ── Popover Aa ────────────────────────────────────────────────────
+  const aaPop = $('aa-pop');
+  $('btn-aa').addEventListener('click', e => {
+    e.stopPropagation();
+    aaPop.hidden = !aaPop.hidden;
+    $('btn-aa').classList.toggle('active', !aaPop.hidden);
+  });
+  document.addEventListener('click', e => {
+    if (!aaPop.hidden && !aaPop.contains(e.target)) {
+      aaPop.hidden = true;
+      $('btn-aa').classList.remove('active');
+    }
+  });
 
   // ── Font size ─────────────────────────────────────────────────────
   let fs = parseInt(localStorage.getItem('readerFs')||'19', 10);
@@ -400,9 +475,14 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(()=>$('toast').classList.remove('show'), 1400);
   };
-  html.style.setProperty('--fs', fs+'px');
-  $('btn-fs-up').addEventListener('click',   () => { if(fs<28){fs++;html.style.setProperty('--fs',fs+'px');localStorage.setItem('readerFs',fs);showToast(`Fonte: ${fs}px`);} });
-  $('btn-fs-down').addEventListener('click', () => { if(fs>14){fs--;html.style.setProperty('--fs',fs+'px');localStorage.setItem('readerFs',fs);showToast(`Fonte: ${fs}px`);} });
+  const applyFs = () => {
+    html.style.setProperty('--fs', fs+'px');
+    localStorage.setItem('readerFs', fs);
+    $('fs-val').textContent = fs+'px';
+  };
+  applyFs();
+  $('btn-fs-up').addEventListener('click',   () => { if(fs<28){fs++;applyFs();} });
+  $('btn-fs-down').addEventListener('click', () => { if(fs>14){fs--;applyFs();} });
 
   // ── Card building ──────────────────────────────────────────────────
   function splitBySentence(text, maxLen) {
@@ -553,6 +633,7 @@
 
     $('tb-chapter').textContent = card.chapter||'';
     $('tb-book').textContent    = BOOK_TITLE;
+    document.title = `${Math.round(pct)}% · ${BOOK_TITLE} — f9`;
   }
 
   // ── Navigation ────────────────────────────────────────────────────
@@ -560,38 +641,51 @@
   let current=0, busy=false;
   const DUR=320;
 
+  // Estado pós-navegação compartilhado entre goTo (botões/teclas) e o swipe físico
+  function afterNav(idx) {
+    current=idx;
+    setCookie(COOKIE_KEY, idx, YEAR_MS);
+    updateUI(current);
+    busy=false;
+
+    // Reset translation state for new card
+    translatedNow = false; _translatedLang = null;
+    $('btn-xlat').classList.toggle('active', translationMode);
+    $('xlat-badge').hidden = true;
+    clearTimeout(_autoXlatTimer);
+    if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
+
+    if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+  }
+
   function goTo(idx, dir) {
     if (busy||idx<0||idx>=TOTAL||idx===current) return;
     busy=true;
     if (ttsActive) cancelCurrent();   // para áudio imediatamente, sem vazar na transição
-    setCookie(COOKIE_KEY, idx, YEAR_MS);
+
+    // Capítulos entram com fade mais lento — pequena cerimônia
+    const isCh = CARDS[idx].type==='chapter';
+    const D    = isCh ? 500 : DUR;
 
     renderCard(back, CARDS[idx]);
     back.style.transition='none';
     back.style.transform = dir>0 ? 'translateY(100%)' : 'translateY(-100%)';
+    if (isCh) back.style.opacity='0.25';
     back.getBoundingClientRect();
 
-    const ease = `transform ${DUR}ms cubic-bezier(0.4,0,0.2,1)`;
+    const ease = `transform ${D}ms cubic-bezier(0.25,1,0.5,1), opacity ${D}ms ease`;
     front.style.transition=ease; back.style.transition=ease;
     front.style.transform = dir>0 ? 'translateY(-100%)' : 'translateY(100%)';
     back.style.transform  = 'translateY(0)';
+    back.style.opacity='1';
 
     setTimeout(() => {
       front.style.transition='none';
       front.style.transform  = dir>0 ? 'translateY(100%)' : 'translateY(-100%)';
+      front.style.opacity=''; back.style.opacity='';
       [front,back]=[back,front];
-      current=idx;
-      updateUI(current);
-      busy=false;
-
-      // Reset translation state for new card
-      translatedNow = false; _translatedLang = null;
-      $('btn-xlat').classList.toggle('active', translationMode);
-      clearTimeout(_autoXlatTimer);
-      if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
-
-      if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
-    }, DUR);
+      afterNav(idx);
+    }, D);
   }
 
   const next=()=>goTo(current+1, 1);
@@ -617,16 +711,102 @@
     }
   });
 
-  // ── Swipe ─────────────────────────────────────────────────────────
-  let tY0=0, tX0=0;
+  // ── Swipe físico: o card segue o dedo ────────────────────────────
+  const stack = document.querySelector('.card-stack');
   const hint=$('swipe-hint'); let hintGone=false;
   const dismissHint=()=>{ if(!hintGone){hintGone=true;hint.classList.add('gone');} };
-  document.addEventListener('touchstart',e=>{tY0=e.changedTouches[0].clientY;tX0=e.changedTouches[0].clientX;},{passive:true});
-  document.addEventListener('touchend',e=>{
-    const dy=tY0-e.changedTouches[0].clientY, dx=Math.abs(tX0-e.changedTouches[0].clientX);
-    if (Math.abs(dy)>50 && Math.abs(dy)>dx*1.4) { dy>0?next():prev(); dismissHint(); }
-  },{passive:true});
   setTimeout(dismissHint,4500);
+
+  let dragOn=false, dragEngaged=false, dragDir=0, dragIdx=-1, edgeDrag=false;
+  let dY=0, startY=0, startX=0, lastY=0, lastT=0, vel=0;
+
+  // Se o conteúdo do card ainda pode rolar na direção do gesto, deixa rolar
+  function innerCanScroll(dir) {
+    const inner = front.querySelector('.card-inner');
+    if (!inner) return false;
+    if (dir>0) return inner.scrollTop + inner.clientHeight < inner.scrollHeight - 2;
+    return inner.scrollTop > 2;
+  }
+
+  document.addEventListener('touchstart', e => {
+    if (busy || e.target.closest('.toolbar,.bottom-bar,.aa-pop')) { dragOn=false; return; }
+    const t=e.changedTouches[0];
+    dragOn=true; dragEngaged=false; dY=0; vel=0; dragDir=0; dragIdx=-1; edgeDrag=false;
+    startY=t.clientY; startX=t.clientX; lastY=t.clientY; lastT=e.timeStamp;
+  }, {passive:true});
+
+  document.addEventListener('touchmove', e => {
+    if (!dragOn || busy) return;
+    const t=e.changedTouches[0];
+    const dy=t.clientY-startY, dx=t.clientX-startX;
+    const dt=e.timeStamp-lastT;
+    if (dt>0) { vel=(t.clientY-lastY)/dt; lastY=t.clientY; lastT=e.timeStamp; }
+
+    if (!dragEngaged) {
+      if (Math.abs(dy)<12 || Math.abs(dy)<Math.abs(dx)*1.2) return;
+      const dir = dy<0 ? 1 : -1;
+      if (innerCanScroll(dir)) { dragOn=false; return; }
+      dragEngaged=true; dragDir=dir;
+      dragIdx=current+dir;
+      edgeDrag = dragIdx<0 || dragIdx>=TOTAL;
+      if (!edgeDrag) { renderCard(back, CARDS[dragIdx]); back.style.transition='none'; }
+      front.style.transition='none';
+      dismissHint();
+    }
+
+    e.preventDefault();
+    dY=t.clientY-startY;
+    const h=stack.clientHeight;
+
+    if (edgeDrag) {                          // rubber-band na primeira/última página
+      front.style.transform=`translateY(${dY*0.35}px)`;
+      return;
+    }
+    const eff = dragDir>0 ? Math.min(0,dY) : Math.max(0,dY);
+    front.style.transform=`translateY(${eff}px)`;
+    back.style.transform =`translateY(${(dragDir>0?h:-h)+eff}px)`;
+  }, {passive:false});
+
+  function endDrag() {
+    if (!dragOn) return;
+    dragOn=false;
+    if (!dragEngaged) return;
+    dragEngaged=false;
+    const h=stack.clientHeight;
+
+    if (edgeDrag) {
+      front.style.transition='transform 260ms cubic-bezier(0.25,1,0.5,1)';
+      front.style.transform='translateY(0)';
+      return;
+    }
+
+    const eff    = dragDir>0 ? Math.min(0,dY) : Math.max(0,dY);
+    const flick  = dragDir>0 ? vel<-0.45 : vel>0.45;   // px/ms
+    const commit = Math.abs(eff)>h*0.22 || flick;
+    busy=true;
+    const dur  = commit ? Math.max(160, 300-Math.abs(vel)*120) : 240;
+    const ease = `transform ${dur}ms cubic-bezier(0.25,1,0.5,1)`;
+    front.style.transition=ease; back.style.transition=ease;
+
+    if (commit) {
+      if (ttsActive) cancelCurrent();
+      front.style.transform=`translateY(${dragDir>0?-h:h}px)`;
+      back.style.transform='translateY(0)';
+      const idx=dragIdx, dir=dragDir;
+      setTimeout(()=>{
+        front.style.transition='none';
+        front.style.transform = dir>0 ? 'translateY(100%)' : 'translateY(-100%)';
+        [front,back]=[back,front];
+        afterNav(idx);
+      }, dur);
+    } else {
+      front.style.transform='translateY(0)';
+      back.style.transform=`translateY(${dragDir>0?'100%':'-100%'})`;
+      setTimeout(()=>{ busy=false; }, dur);
+    }
+  }
+  document.addEventListener('touchend', endDrag, {passive:true});
+  document.addEventListener('touchcancel', endDrag, {passive:true});
 
   // Toolbar sempre visível
 
@@ -670,6 +850,38 @@
     }
     return { text: cardText(current), lang: $('tts-lang-sel').value,
              container: front.querySelector('.card-inner') };
+  }
+
+  // Pré-busca o áudio da próxima página enquanto a atual toca —
+  // elimina o silêncio entre cards no modo narração contínua.
+  const _ttsPre = new Map();   // "idx|lang|rate" → Promise<{words, buf}>
+  async function prefetchTTS(idx) {
+    if (idx >= TOTAL) return;
+    let text, lang;
+    if (translationMode) {
+      const to = $('target-lang').value;
+      const t  = cache[`${idx}_${to}`];
+      if (!t) return;                     // tradução ainda não chegou; sem prefetch
+      text = t; lang = to.split('-')[0];
+    } else {
+      text = cardText(idx); lang = $('tts-lang-sel').value.split('-')[0];
+    }
+    if (!text.trim()) return;
+    const key = `${idx}|${lang}|${ttsRate}`;
+    if (_ttsPre.has(key)) return;
+    const p = (async () => {
+      const r = await fetch('/api/tts', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text, lang, rate: ttsRate }),
+      });
+      if (!r.ok) throw new Error('prefetch_failed');
+      const j   = await r.json();
+      const buf = await (await fetch(j.audio)).arrayBuffer();
+      return { words: j.words, buf };
+    })();
+    p.catch(() => _ttsPre.delete(key));
+    _ttsPre.set(key, p);
+    if (_ttsPre.size > 4) _ttsPre.delete(_ttsPre.keys().next().value);
   }
 
   // ── Karaoke ───────────────────────────────────────────────────
@@ -740,26 +952,42 @@
     unwrapWords();
     if (container) wrapWords(container);
 
-    $('tts-play').textContent='⏳'; $('btn-tts').textContent='⏳';
+    $('tts-play').textContent='⏳';
     $('tts-stop').classList.add('active');
 
     // ── Try server TTS via Web Audio API (bypasses iOS autoplay + silent mode) ──
     try {
-      const resp = await fetch('/api/tts', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ text, lang: lang.split('-')[0], rate: ttsRate }),
-        signal: AbortSignal.timeout(20000),
-      });
-      if (gen !== _ttsGen || !ttsActive) return;
-      if (!resp.ok) throw new Error('server_unavailable');
-      const { audio, words } = await resp.json();
-      if (gen !== _ttsGen || !ttsActive) return;
+      let words, arrayBuf;
 
-      // Fetch audio bytes (not just a URL) so AudioContext can decode them
-      const audioResp = await fetch(audio);
-      if (gen !== _ttsGen || !ttsActive) return;
-      const arrayBuf = await audioResp.arrayBuffer();
-      if (gen !== _ttsGen || !ttsActive) return;
+      // Áudio pré-buscado? Usa direto, sem round-trip
+      const preKey = `${current}|${lang.split('-')[0]}|${ttsRate}`;
+      if (_ttsPre.has(preKey)) {
+        try {
+          const pre = await _ttsPre.get(preKey);
+          words = pre.words; arrayBuf = pre.buf.slice(0);
+        } catch {}
+        _ttsPre.delete(preKey);
+        if (gen !== _ttsGen || !ttsActive) return;
+      }
+
+      if (!arrayBuf) {
+        const resp = await fetch('/api/tts', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ text, lang: lang.split('-')[0], rate: ttsRate }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (gen !== _ttsGen || !ttsActive) return;
+        if (!resp.ok) throw new Error('server_unavailable');
+        const j = await resp.json();
+        words = j.words;
+        if (gen !== _ttsGen || !ttsActive) return;
+
+        // Fetch audio bytes (not just a URL) so AudioContext can decode them
+        const audioResp = await fetch(j.audio);
+        if (gen !== _ttsGen || !ttsActive) return;
+        arrayBuf = await audioResp.arrayBuffer();
+        if (gen !== _ttsGen || !ttsActive) return;
+      }
 
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (_audioCtx.state === 'suspended') await _audioCtx.resume();
@@ -787,6 +1015,7 @@
         if (current < TOTAL-1) next(); else ttsStop();
       };
       _audioSrc.start(0);
+      prefetchTTS(current+1);
 
     } catch {
       // ── Fallback: Web Speech API ──────────────────────────────
@@ -815,7 +1044,6 @@
   function ttsToggle() {
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
-      $('btn-tts').classList.add('active');
       // Unlock AudioContext on iOS/Android in the user-gesture thread.
       // After resume(), decodeAudioData + start() work freely even after await.
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -833,8 +1061,6 @@
   function ttsStop() {
     cancelCurrent(); unwrapWords();
     ttsActive=false; ttsPaused=false; _usingEdge=false;
-    $('btn-tts').classList.remove('active');
-    $('btn-tts').textContent='🔊';
     $('tts-play').textContent='▶';
     $('tts-play').classList.remove('active');
     $('tts-stop').classList.remove('active');
@@ -844,7 +1070,6 @@
 
   function updateTtsBtn() {
     const playing = ttsActive && !ttsPaused;
-    $('btn-tts').textContent  = playing ? '⏸' : (ttsActive ? '▶' : '🔊');
     $('tts-play').textContent = playing ? '⏸' : '▶';
     $('tts-play').classList.toggle('active', ttsActive);
     $('tts-stop').classList.toggle('active', ttsActive);
@@ -854,13 +1079,13 @@
   $('tts-lang-sel').value = detectedBcp47;
   if (!$('tts-lang-sel').value) $('tts-lang-sel').value = 'pt-BR';
 
-  $('btn-tts').addEventListener('click', ttsToggle);
   $('tts-play').addEventListener('click', ttsToggle);
   $('tts-stop').addEventListener('click', ttsStop);
   $('btn-prev').addEventListener('click', prev);
   $('btn-next').addEventListener('click', next);
   $('tts-speed').addEventListener('change', e => {
     ttsRate=parseFloat(e.target.value);
+    _ttsPre.clear();
     if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   });
 
@@ -868,7 +1093,18 @@
   // TRANSLATION — inline (replaces card text in place)
   // Primary: Google Translate unofficial · Fallback: MyMemory
   // ════════════════════════════════════════════════════════════════
-  const cache = {};        // { "cardIdx_lang": translatedText }
+  // Cache persistente por livro — quem lê traduzido não re-traduz a cada sessão
+  const XLAT_KEY = 'xlat_' + BOOK_ID;
+  let cache = {};          // { "cardIdx_lang": translatedText }
+  try { cache = JSON.parse(localStorage.getItem(XLAT_KEY) || '{}'); } catch {}
+  let _xlatSaveT = null;
+  function saveXlatCache() {
+    clearTimeout(_xlatSaveT);
+    _xlatSaveT = setTimeout(() => {
+      try { localStorage.setItem(XLAT_KEY, JSON.stringify(cache)); }
+      catch { try { localStorage.removeItem(XLAT_KEY); } catch {} }
+    }, 800);
+  }
   let translatedNow = false, _translatedLang = null;
   let translationMode = false, _autoXlatTimer = null;
 
@@ -906,6 +1142,10 @@
     translatedNow = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
     $('btn-xlat').classList.add('active');
+    const badge = $('xlat-badge');
+    const fromLabel = BOOK_LANG !== 'unknown' ? BOOK_LANG.toUpperCase() : 'AUTO';
+    badge.textContent = `${fromLabel} → ${toIso.split('-')[0].toUpperCase()}`;
+    badge.hidden = false;
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
 
@@ -913,6 +1153,7 @@
     renderCard(front, CARDS[current]);
     translatedNow = false; _translatedLang = null;
     $('btn-xlat').classList.remove('active');
+    $('xlat-badge').hidden = true;
     if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   }
 
@@ -933,15 +1174,21 @@
     const cacheKey = `${idx}_${to}`;
     if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); preFetchTranslations(idx); return; }
 
-    showToast('Traduzindo…');
+    // Feedback no próprio card: pulso suave enquanto traduz
+    const inner = front.querySelector('.card-inner');
+    if (inner) inner.classList.add('xlat-loading');
     try {
       const from   = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
+      saveXlatCache();
+      if (idx !== current) return;   // usuário já virou a página
       applyTranslation(result, to);
       preFetchTranslations(idx);
     } catch {
-      showToast('Erro na tradução. Tente novamente.');
+      showToast('A tradução falhou. Tente de novo.');
+    } finally {
+      if (inner) inner.classList.remove('xlat-loading');
     }
   }
 
@@ -955,7 +1202,9 @@
       if (cache[cacheKey]) continue;
       const text = cardText(idx);
       if (!text) continue;
-      fetchTranslation(text, from, to).then(r => { if (r) cache[cacheKey] = r; }).catch(() => {});
+      fetchTranslation(text, from, to)
+        .then(r => { if (r) { cache[cacheKey] = r; saveXlatCache(); } })
+        .catch(() => {});
     }
   }
 
@@ -973,12 +1222,17 @@
 
   // Re-translate with new language if mode is on or currently showing translation
   $('target-lang').addEventListener('change', () => {
+    _ttsPre.clear();
     if (translatedNow || translationMode) {
       clearTimeout(_autoXlatTimer);
       translatedNow = false; _translatedLang = null;
       translateCard(current);
     }
   });
+
+  // ── Service worker (leitura offline + cache de áudio) ────────────
+  if ('serviceWorker' in navigator)
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 })();
 </script>

@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="f9 reader — Leia EPUB e PDF em qualquer tela">
   <title>f9 reader</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#F7F2E8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1C1814" media="(prefers-color-scheme: dark)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -229,6 +232,21 @@
       border-color: var(--accent);
       background: var(--bg3);
     }
+    .recent-cover {
+      width: 36px;
+      height: 50px;
+      border-radius: 6px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Lora', Georgia, serif;
+      font-weight: 600;
+      font-size: 0.78rem;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,.3);
+      user-select: none;
+    }
     .recent-item-info {
       flex: 1;
       min-width: 0;
@@ -326,7 +344,7 @@
 
   <div class="loading-overlay" id="loading" aria-live="polite">
     <div class="spinner"></div>
-    <p class="loading-text">Processando livro…</p>
+    <p class="loading-text">Preparando sua leitura…</p>
   </div>
 
   <main>
@@ -412,6 +430,22 @@
       return m ? decodeURIComponent(m[1]) : null;
     }
 
+    // Capa gerada: iniciais do título sobre gradiente estável (hash do título)
+    const COVER_GRADS = [
+      ['#9B6A2F','#C8956C'], ['#6B4A8E','#9B7BC4'], ['#2F6B4F','#5FA882'],
+      ['#8E3A3A','#C46B6B'], ['#2F5B8E','#6B9BC4'], ['#7A6224','#B39A54'],
+    ];
+    function coverStyle(title) {
+      let h = 0;
+      for (const ch of title) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      const [a, b] = COVER_GRADS[h % COVER_GRADS.length];
+      return `background:linear-gradient(135deg,${a},${b})`;
+    }
+    function coverInitials(title) {
+      const w = title.trim().split(/\s+/).filter(x => /[\p{L}\p{N}]/u.test(x));
+      return ((w[0]?.[0] || '?') + (w[1]?.[0] || '')).toUpperCase();
+    }
+
     function loadRecent() {
       let recent;
       try { recent = JSON.parse(localStorage.getItem('recentBooks') || '[]'); }
@@ -432,13 +466,14 @@
           ? Math.max(1, Math.min(100, Math.round((pos + 1) / tot * 100)))
           : null;
 
-        const pctLabel = pct !== null ? pct + '%' : (pos !== null ? '—' : 'novo');
+        const pctLabel = pct !== null ? pct + '%' : (pos !== null ? '—' : 'Começar');
         const barWidth = pct !== null ? pct : 0;
 
         const li = document.createElement('li');
         li.dataset.id = book.id;
         li.innerHTML =
           `<a class="recent-item" href="/reader/${esc(book.id)}">
+            <div class="recent-cover" style="${coverStyle(book.title || '')}" aria-hidden="true">${esc(coverInitials(book.title || '?'))}</div>
             <div class="recent-item-info">
               <div class="recent-item-title">${esc(book.title || 'Sem título')}</div>
               <div class="progress-row">
@@ -467,6 +502,9 @@
     }
 
     loadRecent();
+
+    if ('serviceWorker' in navigator)
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
   </script>
 </body>
 </html>

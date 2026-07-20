@@ -355,6 +355,12 @@ def api_tts():
     return jsonify({'audio': f'/api/tts/audio/{key}', 'words': words})
 
 
+@app.route('/sw.js')
+def service_worker():
+    # Servido da raiz para que o escopo do SW cubra o site inteiro
+    return send_file(Path('static') / 'sw.js', mimetype='application/javascript')
+
+
 @app.route('/api/tts/audio/<key>')
 def api_tts_audio(key):
     if len(key) != 32 or not all(c in '0123456789abcdef' for c in key):
