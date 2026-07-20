@@ -591,11 +591,32 @@
   const TOTAL_CHARS     = _off;
   const TOTAL_PAGES_EST = Math.max(1, Math.ceil(TOTAL_CHARS / PAGE_SIZE));
 
+  // Junta blocos de texto com pausa natural (ponto no final se não tiver pontuação)
+  function extractTextWithPauses(el) {
+    const blocks = el.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote');
+    if (blocks.length <= 1) return el.textContent.trim();
+    return Array.from(blocks).map(b => {
+      const t = b.textContent.trim();
+      return t && !/[.!?…»"']$/.test(t) ? t + '.' : t;
+    }).filter(t => t).join(' ');
+  }
+
   // Plain-text extraction per card (for TTS)
   function cardText(idx) {
     const tmp = document.createElement('div');
     tmp.innerHTML = CARDS[idx].html || '';
-    return tmp.textContent.trim();
+    return extractTextWithPauses(tmp);
+  }
+
+  // Texto para tradução: parágrafos separados por \n\n (o Google Translate
+  // preserva o separador, então a tradução volta com os parágrafos intactos)
+  function cardTextForXlat(idx) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = CARDS[idx].html || '';
+    const blocks = Array.from(tmp.querySelectorAll('p,li,blockquote,h1,h2,h3,h4,h5,h6'));
+    return blocks.length > 1
+      ? blocks.map(b => b.textContent.trim()).filter(t => t).join('\n\n')
+      : tmp.textContent.trim();
   }
 
   // ── Render cards ─────────────────────────────────────────────────
@@ -622,7 +643,15 @@
 
   function updateUI(idx) {
     const card    = CARDS[idx];
-    const pct     = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
+    // Percentual lido: mesma métrica do contador (chars p/ EPUB, página p/ PDF)
+    let pct;
+    if (BOOK_FORMAT === 'pdf' && card.sectionIdx) {
+      pct = (card.sectionIdx / TOTAL_SECTIONS) * 100;
+    } else if (TOTAL_CHARS > 0 && card.charLen !== undefined) {
+      pct = ((card.charOffset + card.charLen) / TOTAL_CHARS) * 100;
+    } else {
+      pct = TOTAL>1 ? (idx/(TOTAL-1))*100 : 100;
+    }
     const counter = $('tb-counter');
     $('progress-fill').style.width = pct+'%';
 
@@ -660,15 +689,26 @@
     $('btn-xlat').classList.toggle('active', translationMode);
     $('xlat-badge').hidden = true;
     clearTimeout(_autoXlatTimer);
-    if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
 
-    if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+    if (translationMode && ttsActive) {
+      // Narrando com tradução: espera traduzir antes de falar — senão o TTS
+      // começa no idioma original e é cancelado no meio pela tradução
+      cancelCurrent();
+      _autoXlatTimer = setTimeout(() => {
+        translateCard(current).then(ok => {
+          if (!ok && ttsActive) setTimeout(ttsSpeak, 60);   // falhou → lê o original
+        });
+      }, 120);
+    } else {
+      if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
+      if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+    }
   }
 
   function goTo(idx, dir) {
     if (busy||idx<0||idx>=TOTAL||idx===current) return;
     busy=true;
-    if (ttsActive) cancelCurrent();   // para áudio imediatamente, sem vazar na transição
+    if (ttsActive) { saveTTSPos(); cancelCurrent(); }   // salva posição e corta o áudio
 
     // Capítulos entram com fade mais lento — pequena cerimônia
     const isCh = CARDS[idx].type==='chapter';
@@ -796,7 +836,7 @@
     front.style.transition=ease; back.style.transition=ease;
 
     if (commit) {
-      if (ttsActive) cancelCurrent();
+      if (ttsActive) { saveTTSPos(); cancelCurrent(); }
       front.style.transform=`translateY(${dragDir>0?-h:h}px)`;
       back.style.transform='translateY(0)';
       const idx=dragIdx, dir=dragDir;
@@ -832,6 +872,13 @@
   let ttsActive=false, ttsPaused=false, ttsRate=1, _usingEdge=false, _ttsGen=0;
   let _audioCtx=null, _audioSrc=null;   // Web Audio API (bypasses iOS autoplay + silent mode)
 
+  // ── Posição do TTS: para no meio, retoma de onde parou ───────────
+  const TTS_POS_KEY = 'ttsPos_' + BOOK_ID;
+  let _ttsCharPos = 0;   // char offset da palavra sendo lida agora
+  const saveTTSPos  = () => { if (_ttsCharPos > 20) try { localStorage.setItem(TTS_POS_KEY, JSON.stringify({card: current, pos: _ttsCharPos})); } catch {} };
+  const clearTTSPos = () => { _ttsCharPos = 0; try { localStorage.removeItem(TTS_POS_KEY); } catch {} };
+  const loadTTSPos  = () => { try { const d=JSON.parse(localStorage.getItem(TTS_POS_KEY)||'null'); return (d&&d.card===current&&d.pos>20)?d.pos:0; } catch { return 0; } };
+
   const ISO_TO_BCP47 = {
     'pt':'pt-BR','en':'en-US','es':'es-ES','fr':'fr-FR','de':'de-DE',
     'it':'it-IT','ja':'ja-JP','zh':'zh-CN','zh-cn':'zh-CN',
@@ -852,7 +899,7 @@
   function ttsContext() {
     if (translatedNow && _translatedLang) {
       const inner = front.querySelector('.card-inner');
-      const text  = inner ? inner.textContent.trim() : cardText(current);
+      const text  = inner ? extractTextWithPauses(inner) : cardText(current);
       return { text, lang: _translatedLang, container: inner };
     }
     return { text: cardText(current), lang: $('tts-lang-sel').value,
@@ -986,6 +1033,7 @@
 
   // Web Speech: highlight by char offset
   function highlightWord(charIndex) {
+    _ttsCharPos = charIndex;
     if (activeSpan) activeSpan.classList.remove('tts-active');
     const found = wordSpans.find(sp=>sp._s<=charIndex&&sp._e>charIndex)
                || wordSpans.find(sp=>sp._s>=charIndex);
@@ -1001,6 +1049,7 @@
     for (let i = Math.max(0, spanSeqIdx); i < end; i++) {
       if (norm(wordSpans[i].textContent) === nw) {
         spanSeqIdx=i+1; wordSpans[i].classList.add('tts-active'); activeSpan=wordSpans[i];
+        _ttsCharPos = wordSpans[i]._s;
         wordSpans[i].scrollIntoView({behavior:'smooth',block:'nearest'}); return;
       }
     }
@@ -1008,6 +1057,7 @@
 
   // ── Engine control ────────────────────────────────────────────
   function cancelCurrent() {
+    _ttsGen++;   // invalida ttsSpeak() em andamento e todos os timers/fetches com gen capturado
     if (_usingEdge) {
       if (_audioSrc) { try { _audioSrc.onended=null; _audioSrc.stop(0); } catch {} _audioSrc=null; }
     } else { synth.cancel(); }
@@ -1015,11 +1065,23 @@
 
   async function ttsSpeak() {
     const gen = ++_ttsGen;
-    const { text, lang, container } = ttsContext();
+    _ttsCharPos = 0;
+    const resumePos = loadTTSPos();
+    if (resumePos > 0) clearTTSPos();   // consumido — não reusar
+
+    const { text: fullText, lang, container } = ttsContext();
+    const text = resumePos > 0 ? fullText.slice(resumePos) : fullText;
     if (!text.trim()) { if (ttsActive) next(); return; }
 
     unwrapWords();
-    if (container) wrapWords(container);
+    if (container) {
+      wrapWords(container);
+      // Reposiciona o karaokê no ponto de retomada
+      if (resumePos > 0) {
+        const startIdx = wordSpans.findIndex(sp => sp._s >= resumePos);
+        if (startIdx >= 0) { spanSeqIdx = startIdx; highlightWord(wordSpans[startIdx]._s); }
+      }
+    }
 
     $('tts-play').textContent='⏳';
     $('tts-stop').classList.add('active');
@@ -1028,9 +1090,9 @@
     try {
       let words, arrayBuf, isPiper = false;
 
-      // Áudio pré-buscado? Usa direto, sem round-trip
+      // Áudio pré-buscado? Usa direto, sem round-trip (não vale se retomando do meio)
       const preKey = `${current}|${lang.split('-')[0]}|${ttsRate}`;
-      if (_ttsPre.has(preKey)) {
+      if (!resumePos && _ttsPre.has(preKey)) {
         try {
           const pre = await _ttsPre.get(preKey);
           words = pre.words; arrayBuf = pre.buf.slice(0); isPiper = !!pre.piper;
@@ -1068,7 +1130,9 @@
       }
 
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (_audioCtx.state === 'suspended') await _audioCtx.resume();
+      // Sem await: fora do gesto do usuário o resume() não resolve no iOS.
+      // O contexto já foi desbloqueado pelo buffer silencioso em ttsToggle().
+      if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
       const audioBuf = await _audioCtx.decodeAudioData(arrayBuf);
       if (gen !== _ttsGen || !ttsActive) return;
 
@@ -1097,6 +1161,7 @@
       _audioSrc.onended = () => {
         unwrapWords();
         if (!ttsActive || gen !== _ttsGen) return;
+        clearTTSPos();   // terminou a página naturalmente — não retomar aqui
         if (current < TOTAL-1) next(); else ttsStop();
       };
       _audioSrc.start(0);
@@ -1114,12 +1179,13 @@
       const estMs = Math.ceil(text.length * 14 / ttsRate) + 4000;
       let _fbTimer = setTimeout(() => {
         if (!ttsActive || synth.speaking || gen !== _ttsGen) return;
-        unwrapWords(); if (current<TOTAL-1) next(); else ttsStop();
+        clearTTSPos(); unwrapWords(); if (current<TOTAL-1) next(); else ttsStop();
       }, estMs);
 
-      utt.onboundary = e => { if (e.name==='word') highlightWord(e.charIndex); };
-      utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
-      utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted') ttsStop(); };
+      utt.onboundary = e => { if (e.name==='word') highlightWord(resumePos + e.charIndex); };
+      utt.onend  = () => { clearTimeout(_fbTimer); if (!ttsActive||gen!==_ttsGen) return; clearTTSPos(); unwrapWords(); if (current<TOTAL-1) next(); else ttsStop(); };
+      // iOS Safari dispara 'canceled' (não 'interrupted') em synth.cancel() intencional
+      utt.onerror = e => { clearTimeout(_fbTimer); unwrapWords(); if (e.error!=='interrupted'&&e.error!=='canceled') ttsStop(); };
       synth.cancel(); synth.speak(utt);
     }
 
@@ -1129,11 +1195,18 @@
   function ttsToggle() {
     if (!ttsActive) {
       ttsActive=true; ttsPaused=false;
-      // Unlock AudioContext on iOS/Android in the user-gesture thread.
-      // After resume(), decodeAudioData + start() work freely even after await.
       if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      _audioCtx.resume().catch(() => {});
-      ttsSpeak();
+      // iOS Safari exige um buffer real tocado sincronicamente DENTRO do gesto
+      // para desbloquear o AudioContext — resume() sozinho não basta.
+      try {
+        const silSrc = _audioCtx.createBufferSource();
+        silSrc.buffer = _audioCtx.createBuffer(1, 1, 22050);
+        silSrc.connect(_audioCtx.destination); silSrc.start(0);
+      } catch {}
+      // Prime do Web Speech no gesto (destrava o fallback no iOS)
+      try { const u = new SpeechSynthesisUtterance(''); u.volume = 0; synth.speak(u); } catch {}
+      // Encadeia após o resume — contexto 'running' antes de decodificar
+      _audioCtx.resume().then(() => ttsSpeak()).catch(() => ttsSpeak());
     } else if (ttsPaused) {
       if (_usingEdge) { _audioCtx && _audioCtx.resume().catch(() => {}); } else synth.resume();
       ttsPaused=false; updateTtsBtn();
@@ -1144,6 +1217,7 @@
   }
 
   function ttsStop() {
+    saveTTSPos();
     cancelCurrent(); unwrapWords();
     ttsActive=false; ttsPaused=false; _usingEdge=false;
     $('tts-play').textContent='▶';
@@ -1229,10 +1303,12 @@
   function applyTranslation(text, toIso) {
     const inner = front.querySelector('.card-inner');
     if (!inner) return;
-    inner.innerHTML = text.split(/\n+/).filter(l => l.trim())
-      .map(l => `<p>${l}</p>`).join('');
+    // \n{2,} = parágrafo real; \n simples é quebra que o Google insere em frases longas
+    inner.innerHTML = text.split(/\n{2,}/).filter(l => l.trim())
+      .map(l => `<p>${l.replace(/\n/g, ' ')}</p>`).join('');
     translatedNow = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
+    syncTTSFromISO(toIso);   // seletor de voz acompanha o idioma da tradução
     $('btn-xlat').classList.add('active');
     const badge = $('xlat-badge');
     const fromLabel = BOOK_LANG !== 'unknown' ? BOOK_LANG.toUpperCase() : 'AUTO';
@@ -1257,14 +1333,14 @@
     // Same-language guard
     if (fromBase && fromBase === toBase) {
       showToast(`O livro já está em ${LANG_NAMES[fromBase] || fromBase}`);
-      return;
+      return false;
     }
 
-    const text = cardText(idx);
-    if (!text) return;
+    const text = cardTextForXlat(idx);
+    if (!text) return false;
 
     const cacheKey = `${idx}_${to}`;
-    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); preFetchTranslations(idx); return; }
+    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); preFetchTranslations(idx); return true; }
 
     // Feedback no próprio card: pulso suave enquanto traduz
     const inner = front.querySelector('.card-inner');
@@ -1274,11 +1350,13 @@
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
       saveXlatCache();
-      if (idx !== current) return;   // usuário já virou a página
+      if (idx !== current) return false;   // usuário já virou a página
       applyTranslation(result, to);
       preFetchTranslations(idx);
+      return true;
     } catch {
       showToast('A tradução falhou. Tente de novo.');
+      return false;
     } finally {
       if (inner) inner.classList.remove('xlat-loading');
     }
@@ -1292,7 +1370,7 @@
       if (idx >= TOTAL) break;
       const cacheKey = `${idx}_${to}`;
       if (cache[cacheKey]) continue;
-      const text = cardText(idx);
+      const text = cardTextForXlat(idx);
       if (!text) continue;
       fetchTranslation(text, from, to)
         .then(r => { if (r) { cache[cacheKey] = r; saveXlatCache(); } })
@@ -1312,13 +1390,39 @@
     }
   });
 
-  // Re-translate with new language if mode is on or currently showing translation
+  // Sincronia bidirecional: tradução ↔ TTS usam sempre o mesmo idioma
+  function syncTTSFromISO(iso) {
+    const bcp47 = ISO_TO_BCP47[iso] || ISO_TO_BCP47[iso.split('-')[0]];
+    if (bcp47) $('tts-lang-sel').value = bcp47;
+  }
+  function syncTranslationFromBCP47(bcp47) {
+    const sel = $('target-lang');
+    const iso = bcp47.split('-')[0].toLowerCase();
+    if (sel.querySelector(`option[value="${iso}"]`)) sel.value = iso;
+    else if (sel.querySelector(`option[value="${bcp47}"]`)) sel.value = bcp47;
+  }
+
+  // Trocar idioma de tradução → sincroniza voz (e re-traduz se ativo)
   $('target-lang').addEventListener('change', () => {
     _ttsPre.clear();
+    syncTTSFromISO($('target-lang').value);
     if (translatedNow || translationMode) {
       clearTimeout(_autoXlatTimer);
       translatedNow = false; _translatedLang = null;
       translateCard(current);
+    }
+  });
+
+  // Trocar idioma da voz → sincroniza tradução (e re-traduz/re-narra se ativo)
+  $('tts-lang-sel').addEventListener('change', e => {
+    _ttsPre.clear();
+    syncTranslationFromBCP47(e.target.value);
+    if (translatedNow || translationMode) {
+      clearTimeout(_autoXlatTimer);
+      translatedNow = false; _translatedLang = null;
+      translateCard(current);
+    } else if (ttsActive && !ttsPaused) {
+      cancelCurrent(); setTimeout(ttsSpeak, 60);
     }
   });
 
