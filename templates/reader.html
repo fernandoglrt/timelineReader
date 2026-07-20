@@ -690,18 +690,19 @@
     $('xlat-badge').hidden = true;
     clearTimeout(_autoXlatTimer);
 
-    if (translationMode && ttsActive) {
-      // Narrando com tradução: espera traduzir antes de falar — senão o TTS
-      // começa no idioma original e é cancelado no meio pela tradução
-      cancelCurrent();
-      _autoXlatTimer = setTimeout(() => {
+    if (translationMode) {
+      // Traduz imediatamente: com cache (pré-carregado) é instantâneo e o card
+      // já entrou renderizado no idioma certo; sem cache, shimmer enquanto busca
+      if (ttsActive) {
+        cancelCurrent();
         translateCard(current).then(ok => {
           if (!ok && ttsActive) setTimeout(ttsSpeak, 60);   // falhou → lê o original
         });
-      }, 120);
-    } else {
-      if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
-      if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+      } else {
+        translateCard(current);
+      }
+    } else if (ttsActive) {
+      cancelCurrent(); setTimeout(ttsSpeak, 60);
     }
   }
 
@@ -715,6 +716,8 @@
     const D    = isCh ? 500 : DUR;
 
     renderCard(back, CARDS[idx]);
+    const preXlat = translatedHtmlFor(idx);
+    if (preXlat) back.querySelector('.card-inner').innerHTML = preXlat;
     back.style.transition='none';
     back.style.transform = dir>0 ? 'translateY(100%)' : 'translateY(-100%)';
     if (isCh) back.style.opacity='0.25';
@@ -796,7 +799,12 @@
       dragEngaged=true; dragDir=dir;
       dragIdx=current+dir;
       edgeDrag = dragIdx<0 || dragIdx>=TOTAL;
-      if (!edgeDrag) { renderCard(back, CARDS[dragIdx]); back.style.transition='none'; }
+      if (!edgeDrag) {
+        renderCard(back, CARDS[dragIdx]);
+        const preXlat = translatedHtmlFor(dragIdx);
+        if (preXlat) back.querySelector('.card-inner').innerHTML = preXlat;
+        back.style.transition='none';
+      }
       front.style.transition='none';
       dismissHint();
     }
@@ -1273,6 +1281,18 @@
   }
   let translatedNow = false, _translatedLang = null;
   let translationMode = false, _autoXlatTimer = null;
+  const _xlatInflight = new Map();   // cacheKey → Promise (dedup prefetch × translateCard)
+
+  const xlatToHtml = text => text.split(/\n{2,}/).filter(l => l.trim())
+    .map(l => `<p>${l.replace(/\n/g, ' ')}</p>`).join('');
+
+  // HTML traduzido pronto para um card — ou null se não estiver no cache.
+  // Usado para renderizar o card já traduzido ANTES da animação de entrada.
+  function translatedHtmlFor(idx) {
+    if (!translationMode) return null;
+    const t = cache[`${idx}_${$('target-lang').value}`];
+    return t ? xlatToHtml(t) : null;
+  }
 
   // Pre-select the opposite of book language
   $('target-lang').value = BOOK_LANG === 'pt' ? 'en' : 'pt';
@@ -1304,8 +1324,7 @@
     const inner = front.querySelector('.card-inner');
     if (!inner) return;
     // \n{2,} = parágrafo real; \n simples é quebra que o Google insere em frases longas
-    inner.innerHTML = text.split(/\n{2,}/).filter(l => l.trim())
-      .map(l => `<p>${l.replace(/\n/g, ' ')}</p>`).join('');
+    inner.innerHTML = xlatToHtml(text);
     translatedNow = true;
     _translatedLang = ISO_TO_BCP47[toIso] || ISO_TO_BCP47[toIso.split('-')[0]] || toIso;
     syncTTSFromISO(toIso);   // seletor de voz acompanha o idioma da tradução
@@ -1346,10 +1365,16 @@
     const inner = front.querySelector('.card-inner');
     if (inner) inner.classList.add('xlat-loading');
     try {
-      const from   = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
-      const result = await fetchTranslation(text, from, to);
-      cache[cacheKey] = result;
-      saveXlatCache();
+      let result;
+      if (_xlatInflight.has(cacheKey)) {
+        result = await _xlatInflight.get(cacheKey);   // prefetch em voo — reaproveita
+        if (!result) throw new Error('xlat_failed');
+      } else {
+        const from = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
+        result = await fetchTranslation(text, from, to);
+        cache[cacheKey] = result;
+        saveXlatCache();
+      }
       if (idx !== current) return false;   // usuário já virou a página
       applyTranslation(result, to);
       preFetchTranslations(idx);
@@ -1369,12 +1394,14 @@
       const idx = fromIdx + i;
       if (idx >= TOTAL) break;
       const cacheKey = `${idx}_${to}`;
-      if (cache[cacheKey]) continue;
+      if (cache[cacheKey] || _xlatInflight.has(cacheKey)) continue;
       const text = cardTextForXlat(idx);
       if (!text) continue;
-      fetchTranslation(text, from, to)
-        .then(r => { if (r) { cache[cacheKey] = r; saveXlatCache(); } })
-        .catch(() => {});
+      const p = fetchTranslation(text, from, to)
+        .then(r => { if (r) { cache[cacheKey] = r; saveXlatCache(); } return r; })
+        .catch(() => null)
+        .finally(() => _xlatInflight.delete(cacheKey));
+      _xlatInflight.set(cacheKey, p);
     }
   }
 
