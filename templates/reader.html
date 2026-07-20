@@ -356,6 +356,13 @@
     <button class="aa-btn" id="btn-dark"></button>
   </div>
   <div class="aa-row">
+    <span class="aa-label">Voz</span>
+    <select class="tl-sel" id="tts-engine">
+      <option value="piper">Neural · no aparelho</option>
+      <option value="server">Padrão · online</option>
+    </select>
+  </div>
+  <div class="aa-row">
     <span class="aa-label">Traduzir para</span>
     <select class="tl-sel" id="target-lang">
       <option value="pt">PT</option>
@@ -852,9 +859,66 @@
              container: front.querySelector('.card-inner') };
   }
 
+  // ── Piper TTS: voz neural rodando no aparelho via WASM ───────────
+  // Modelo (~60MB) baixa uma vez e fica em OPFS; síntese 100% local.
+  const PIPER_CDN = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/+esm';
+  const PIPER_VOICES = {
+    pt:'pt_BR-faber-medium',  en:'en_US-hfc_female-medium', es:'es_ES-davefx-medium',
+    fr:'fr_FR-siwis-medium',  de:'de_DE-thorsten-medium',   it:'it_IT-riccardo-x_low',
+    ru:'ru_RU-irina-medium',  zh:'zh_CN-huayan-medium',
+  };
+  let ttsEngine = localStorage.getItem('ttsEngine') || 'piper';
+  let _piperMod = null, _piperFailed = false;
+  const _piperReady = {};   // voiceId → true depois da primeira síntese ok
+
+  function piperModule() {
+    if (_piperFailed) return Promise.reject(new Error('piper_unavailable'));
+    if (!_piperMod) {
+      _piperMod = import(PIPER_CDN).catch(e => {
+        _piperFailed = true; _piperMod = null; throw e;
+      });
+    }
+    return _piperMod;
+  }
+
+  // quiet=true (prefetch): nunca dispara download de modelo nem toasts
+  async function piperSynth(text, lang, quiet) {
+    const voiceId = PIPER_VOICES[lang];
+    if (!voiceId) throw new Error('no_piper_voice');
+    const tts = await piperModule();
+    if (!_piperReady[voiceId]) {
+      const stored = await tts.stored().catch(() => []);
+      if (!stored.includes(voiceId)) {
+        if (quiet) throw new Error('model_not_cached');
+        showToast('Baixando voz neural — só na primeira vez');
+      }
+    }
+    let lastPct = -1;
+    const wav = await tts.predict({ text, voiceId }, p => {
+      if (quiet || !p.total) return;
+      const pct = Math.round(p.loaded * 100 / p.total);
+      if (pct !== lastPct) { lastPct = pct; showToast(`Baixando voz neural… ${pct}%`); }
+    });
+    _piperReady[voiceId] = true;
+    return await wav.arrayBuffer();
+  }
+
+  // Karaokê estimado: distribui a duração real do áudio pelos tamanhos das palavras
+  function estimateWordTimings(text, totalMs) {
+    const raw = text.match(/\S+/g) || [];
+    const totalChars = raw.reduce((a, w) => a + w.length + 1, 0) || 1;
+    let t = 0;
+    return raw.map(w => {
+      const d = totalMs * (w.length + 1) / totalChars;
+      const o = { w, s: Math.round(t), d: Math.round(d) };
+      t += d;
+      return o;
+    });
+  }
+
   // Pré-busca o áudio da próxima página enquanto a atual toca —
   // elimina o silêncio entre cards no modo narração contínua.
-  const _ttsPre = new Map();   // "idx|lang|rate" → Promise<{words, buf}>
+  const _ttsPre = new Map();   // "idx|lang|rate" → Promise<{words, buf, piper}>
   async function prefetchTTS(idx) {
     if (idx >= TOTAL) return;
     let text, lang;
@@ -870,6 +934,11 @@
     const key = `${idx}|${lang}|${ttsRate}`;
     if (_ttsPre.has(key)) return;
     const p = (async () => {
+      // Neural local primeiro — sem tocar na rede se o modelo já está aqui
+      if (ttsEngine === 'piper' && PIPER_VOICES[lang]) {
+        try { return { words: null, buf: await piperSynth(text, lang, true), piper: true }; }
+        catch {}
+      }
       const r = await fetch('/api/tts', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ text, lang, rate: ttsRate }),
@@ -957,16 +1026,25 @@
 
     // ── Try server TTS via Web Audio API (bypasses iOS autoplay + silent mode) ──
     try {
-      let words, arrayBuf;
+      let words, arrayBuf, isPiper = false;
 
       // Áudio pré-buscado? Usa direto, sem round-trip
       const preKey = `${current}|${lang.split('-')[0]}|${ttsRate}`;
       if (_ttsPre.has(preKey)) {
         try {
           const pre = await _ttsPre.get(preKey);
-          words = pre.words; arrayBuf = pre.buf.slice(0);
+          words = pre.words; arrayBuf = pre.buf.slice(0); isPiper = !!pre.piper;
         } catch {}
         _ttsPre.delete(preKey);
+        if (gen !== _ttsGen || !ttsActive) return;
+      }
+
+      // Voz neural no aparelho (Piper WASM)
+      if (!arrayBuf && ttsEngine === 'piper') {
+        try {
+          arrayBuf = await piperSynth(text, lang.split('-')[0], false);
+          isPiper = true;
+        } catch {}
         if (gen !== _ttsGen || !ttsActive) return;
       }
 
@@ -994,9 +1072,16 @@
       const audioBuf = await _audioCtx.decodeAudioData(arrayBuf);
       if (gen !== _ttsGen || !ttsActive) return;
 
+      // Piper gera a 1×: a velocidade entra na reprodução, e o karaokê
+      // é estimado sobre a duração real já ajustada
+      if (isPiper || !words) {
+        words = estimateWordTimings(text, audioBuf.duration * 1000 / (isPiper ? ttsRate : 1));
+      }
+
       _usingEdge = true;
       _audioSrc = _audioCtx.createBufferSource();
       _audioSrc.buffer = audioBuf;
+      if (isPiper) _audioSrc.playbackRate.value = ttsRate;
       _audioSrc.connect(_audioCtx.destination);
 
       // Karaoke: track playback position with rAF instead of ontimeupdate
@@ -1085,6 +1170,13 @@
   $('btn-next').addEventListener('click', next);
   $('tts-speed').addEventListener('change', e => {
     ttsRate=parseFloat(e.target.value);
+    _ttsPre.clear();
+    if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
+  });
+  $('tts-engine').value = ttsEngine;
+  $('tts-engine').addEventListener('change', e => {
+    ttsEngine = e.target.value;
+    localStorage.setItem('ttsEngine', ttsEngine);
     _ttsPre.clear();
     if (ttsActive && !ttsPaused) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
   });

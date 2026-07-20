@@ -2,7 +2,15 @@
 // Shell e fontes: cache-first. Páginas de leitura: network-first com fallback
 // (o HTML do /reader/<id> carrega o livro inteiro inline — cacheá-lo = livro offline).
 // Áudio de TTS é imutável por chave → cache-first.
-const CACHE = 'f9-v1';
+const CACHE = 'f9-v2';
+
+// CDNs imutáveis (fontes + runtime WASM do Piper TTS): cache-first
+const CDN_HOSTS = [
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+  'cdn.jsdelivr.net',
+  'cdnjs.cloudflare.com',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -23,8 +31,8 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Google Fonts: cache-first (respostas opacas ok)
-  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+  // Fontes e runtime WASM: cache-first (respostas opacas ok)
+  if (CDN_HOSTS.includes(url.hostname)) {
     e.respondWith(
       caches.open(CACHE).then(async c => {
         const hit = await c.match(req);
