@@ -586,7 +586,9 @@
 
       // Reset translation state for new card
       translatedNow = false; _translatedLang = null;
-      $('btn-xlat').classList.remove('active');
+      $('btn-xlat').classList.toggle('active', translationMode);
+      clearTimeout(_autoXlatTimer);
+      if (translationMode) _autoXlatTimer = setTimeout(() => translateCard(current), 1000);
 
       if (ttsActive) { cancelCurrent(); setTimeout(ttsSpeak, 60); }
     }, DUR);
@@ -632,7 +634,7 @@
   try {
     let r=JSON.parse(localStorage.getItem('recentBooks')||'[]');
     r=r.filter(b=>b.id!==BOOK_ID);
-    r.unshift({id:BOOK_ID,title:BOOK_TITLE});
+    r.unshift({id:BOOK_ID,title:BOOK_TITLE,total:TOTAL});
     localStorage.setItem('recentBooks',JSON.stringify(r.slice(0,10)));
   } catch {}
 
@@ -868,6 +870,7 @@
   // ════════════════════════════════════════════════════════════════
   const cache = {};        // { "cardIdx_lang": translatedText }
   let translatedNow = false, _translatedLang = null;
+  let translationMode = false, _autoXlatTimer = null;
 
   // Pre-select the opposite of book language
   $('target-lang').value = BOOK_LANG === 'pt' ? 'en' : 'pt';
@@ -928,7 +931,7 @@
     if (!text) return;
 
     const cacheKey = `${idx}_${to}`;
-    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); return; }
+    if (cache[cacheKey]) { applyTranslation(cache[cacheKey], to); preFetchTranslations(idx); return; }
 
     showToast('Traduzindo…');
     try {
@@ -936,19 +939,45 @@
       const result = await fetchTranslation(text, from, to);
       cache[cacheKey] = result;
       applyTranslation(result, to);
+      preFetchTranslations(idx);
     } catch {
       showToast('Erro na tradução. Tente novamente.');
     }
   }
 
+  function preFetchTranslations(fromIdx) {
+    const to   = $('target-lang').value;
+    const from = BOOK_LANG === 'unknown' ? 'auto' : BOOK_LANG;
+    for (let i = 1; i <= 4; i++) {
+      const idx = fromIdx + i;
+      if (idx >= TOTAL) break;
+      const cacheKey = `${idx}_${to}`;
+      if (cache[cacheKey]) continue;
+      const text = cardText(idx);
+      if (!text) continue;
+      fetchTranslation(text, from, to).then(r => { if (r) cache[cacheKey] = r; }).catch(() => {});
+    }
+  }
+
   $('btn-xlat').addEventListener('click', () => {
-    if (translatedNow) revertTranslation();
-    else translateCard(current);
+    if (translationMode) {
+      translationMode = false;
+      clearTimeout(_autoXlatTimer);
+      revertTranslation();
+    } else {
+      translationMode = true;
+      $('btn-xlat').classList.add('active');
+      translateCard(current);
+    }
   });
 
-  // Re-translate with new language if already showing translation
+  // Re-translate with new language if mode is on or currently showing translation
   $('target-lang').addEventListener('change', () => {
-    if (translatedNow) { translatedNow = false; translateCard(current); }
+    if (translatedNow || translationMode) {
+      clearTimeout(_autoXlatTimer);
+      translatedNow = false; _translatedLang = null;
+      translateCard(current);
+    }
   });
 
 })();
